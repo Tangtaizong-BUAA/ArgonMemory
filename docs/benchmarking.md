@@ -37,4 +37,4 @@ At minimum compare against the official no-retrieval baseline and an official re
 
 ## Current evidence status
 
-The MCP adapter, persistence smoke gate, pinned public-data ingestion path, and retrieval-only public diagnostic are implemented. A retrieval diagnostic is useful for latency, context size, and literal evidence presence, but it is not an official answer-accuracy score. No LongMemEval-V2 accuracy, LAFS, or leaderboard claim is made until both official domains run with the fixed reader and evaluator.
+The MCP adapter, persistence smoke gate, pinned public-data ingestion path, and retrieval-only public diagnostic are implemented. The first bounded result is published in the [2026-08-26 public retrieval report](benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md). A retrieval diagnostic is useful for latency, context size, and literal evidence presence, but it is not an official answer-accuracy score. No LongMemEval-V2 accuracy, LAFS, or leaderboard claim is made until both official domains run with the fixed reader and evaluator.

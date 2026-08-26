@@ -120,6 +120,10 @@ Argon Memory 是持久记忆层，不替代 Codex、Qoder、Hermes 等客户端 
 
 仓库已提供官方 [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) Agent 长期记忆基准的 MCP 原生适配器，覆盖长期 Web/Enterprise Agent 轨迹、五类记忆能力、回答质量和查询延迟。自造样例只用于接口门禁，绝不作为公开 Benchmark 分数。详见 [Benchmark 入口](benchmarks/README.md)、[报告规范](docs/benchmarking.md) 与首份[公开检索诊断](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md)。
 
+[![LongMemEval-V2 已公开记忆系统横向对比](docs/assets/longmemeval-v2-public-frontier.svg)](benchmarks/README.md#published-memory-system-comparison)
+
+上图按官方统一口径对比 RAG、AgentRunbook-R、Codex、AgentRunbook-C，并将 AgentRunbook-C V2 标为独立研究更新。Argon Memory 的正式回答准确率和 LAFS 仍待完整运行；下图仅为检索诊断，未被混入准确率排名。
+
 [![Argon Memory LongMemEval-V2 公开检索概览](docs/assets/longmemeval-v2-snapshot.svg)](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md)
 
 ## 贡献者

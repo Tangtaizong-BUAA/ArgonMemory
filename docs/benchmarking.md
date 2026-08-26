@@ -27,6 +27,16 @@ Every result must include:
 
 At minimum compare against the official no-retrieval baseline and an official retrieval baseline under the same reader, evaluator, question order, and context budget. A model change invalidates a memory-system comparison unless all compared methods are rerun.
 
+## External comparison rules
+
+- Published LongMemEval-V2 accuracy/latency points may be reproduced only with an explicit link to the official results and their evaluation setting.
+- Research updates that are not leaderboard submissions must be labelled as such.
+- Retrieval diagnostics such as literal phrase presence, hit rate, or context coverage must never be plotted on an answer-accuracy axis.
+- Scores from LoCoMo, LongMemEval-V1, MemoryAgentBench, vendor-authored suites, or private datasets must not be combined into a numeric ranking with LongMemEval-V2.
+- A system without an official result is shown as `pending`, never assigned an estimated point.
+
+The current published comparison is in the [benchmark index](../benchmarks/README.md#published-memory-system-comparison). As of 2026-08-26, the official leaderboard has no third-party entries; the displayed numeric points are released reference systems, with AgentRunbook-C V2 explicitly separated as a research update.
+
 ## Anti-leakage rules
 
 - Retrieval receives only inputs permitted by the official backend API.

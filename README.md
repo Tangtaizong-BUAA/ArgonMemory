@@ -180,6 +180,10 @@ Argon Memory is the memory layer. Your local or hosted agent remains the reasoni
 
 Argon Memory includes an MCP-native adapter for the official [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) Agent memory benchmark. It evaluates long-horizon web and enterprise trajectories across five memory abilities while measuring answer quality and query latency. Synthetic cases are used only as smoke gates and are never reported as benchmark scores. See [benchmarks](benchmarks/README.md), the [reporting policy](docs/benchmarking.md), and the first [public retrieval diagnostic](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md).
 
+[![LongMemEval-V2 published memory-system comparison](docs/assets/longmemeval-v2-public-frontier.svg)](benchmarks/README.md#published-memory-system-comparison)
+
+The comparison above reproduces the official released RAG, AgentRunbook-R, Codex, and AgentRunbook-C accuracy/latency points and separately labels the AgentRunbook-C V2 research update. Argon's official answer accuracy and LAFS remain pending; the diagnostic below is retrieval-only and is not plotted as answer accuracy.
+
 [![Argon Memory LongMemEval-V2 public retrieval snapshot](docs/assets/longmemeval-v2-snapshot.svg)](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md)
 
 ## Lineage and license

@@ -4,6 +4,8 @@
 
 ![Argon Memory LongMemEval-V2 public retrieval snapshot](../assets/longmemeval-v2-snapshot.svg)
 
+For the official RAG, AgentRunbook, and Codex accuracy/latency reference points, see the [published memory-system comparison](../../benchmarks/README.md#published-memory-system-comparison). Argon is intentionally shown there as `pending`, because this report does not run the fixed reader or evaluator.
+
 This run tests Argon Memory through the official LongMemEval-V2 `Memory` interface and Argon's public Streamable HTTP MCP boundary. It measures public-data ingestion, persistence, reload, retrieval latency, context size, and narrow post-retrieval evidence presence. It does not call a reader or evaluator model.
 
 ## Reproducibility manifest

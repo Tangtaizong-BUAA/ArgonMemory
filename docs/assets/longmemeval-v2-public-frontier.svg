@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">LongMemEval-V2 published memory-system comparison</title>
+  <desc id="desc">Two log-latency charts compare published LongMemEval-V2 reference systems on the Small and Medium tiers. Higher accuracy and lower latency are better. AgentRunbook-C V2 is shown separately as a Small-tier research update. Argon Memory has not yet published official answer accuracy or LAFS.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07101f"/>
+      <stop offset="0.55" stop-color="#101a35"/>
+      <stop offset="1" stop-color="#11162a"/>
+    </linearGradient>
+    <linearGradient id="frontier" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c9cff"/>
+      <stop offset="1" stop-color="#70e1c1"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="760" rx="30" fill="url(#background)"/>
+  <circle cx="1090" cy="82" r="108" fill="#7c9cff" opacity="0.045"/>
+  <path d="M994 90 C1030 30 1144 27 1182 101" fill="none" stroke="#7c9cff" stroke-opacity="0.24" stroke-dasharray="3 9"/>
+  <circle cx="1110" cy="48" r="5" fill="#70e1c1" filter="url(#glow)"/>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <text x="60" y="62" fill="#9fb4ff" font-size="15" font-weight="600" letter-spacing="2.4">PUBLISHED PUBLIC COMPARISON</text>
+    <text x="60" y="103" fill="#f5f7ff" font-size="31" font-weight="650">LongMemEval-V2 · Accuracy × query latency</text>
+    <text x="60" y="133" fill="#98a3bc" font-size="16">Combined web + enterprise results · fixed-reader protocol · log latency axis</text>
+    <g transform="translate(902 109)">
+      <path d="M0 11 H42" stroke="url(#frontier)" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="21" cy="11" r="5" fill="#70e1c1"/>
+      <text x="52" y="16" fill="#aeb8ce" font-size="13">higher + left is better</text>
+    </g>
+
+    <!-- Small tier -->
+    <g transform="translate(60 166)">
+      <rect width="520" height="402" rx="20" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.09"/>
+      <text x="24" y="36" fill="#f4f6ff" font-size="18" font-weight="650">LME-V2 Small</text>
+      <text x="496" y="36" fill="#8995ad" font-size="12" text-anchor="end">451-question benchmark tier</text>
+
+      <!-- Plot: x=72..472, log 0.1..200; y=72..312, 80..35 -->
+      <g stroke="#ffffff" stroke-opacity="0.07" stroke-width="1">
+        <line x1="72" y1="72" x2="472" y2="72"/>
+        <line x1="72" y1="125" x2="472" y2="125"/>
+        <line x1="72" y1="179" x2="472" y2="179"/>
+        <line x1="72" y1="232" x2="472" y2="232"/>
+        <line x1="72" y1="285" x2="472" y2="285"/>
+        <line x1="72" y1="72" x2="72" y2="312"/>
+        <line x1="193" y1="72" x2="193" y2="312"/>
+        <line x1="314" y1="72" x2="314" y2="312"/>
+        <line x1="435" y1="72" x2="435" y2="312"/>
+        <line x1="472" y1="72" x2="472" y2="312"/>
+      </g>
+      <g fill="#76829a" font-size="11">
+        <text x="60" y="76" text-anchor="end">80</text>
+        <text x="60" y="129" text-anchor="end">70</text>
+        <text x="60" y="183" text-anchor="end">60</text>
+        <text x="60" y="236" text-anchor="end">50</text>
+        <text x="60" y="289" text-anchor="end">40</text>
+        <text x="72" y="331" text-anchor="middle">0.1</text>
+        <text x="193" y="331" text-anchor="middle">1</text>
+        <text x="314" y="331" text-anchor="middle">10</text>
+        <text x="435" y="331" text-anchor="middle">100</text>
+        <text x="472" y="331" text-anchor="middle">200s</text>
+      </g>
+      <text x="14" y="195" fill="#76829a" font-size="11" transform="rotate(-90 14 195)">ACCURACY %</text>
+
+      <!-- Published reference frontier -->
+      <path d="M108 227 L367 186 L440 99" fill="none" stroke="url(#frontier)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <g>
+        <circle cx="108" cy="227" r="7" fill="#7c9cff" filter="url(#glow)"/>
+        <text x="119" y="220" fill="#d9e0ef" font-size="12" font-weight="600">RAG + notes</text>
+        <text x="119" y="236" fill="#8f9ab2" font-size="11">51.0% · 0.2s</text>
+
+        <circle cx="367" cy="186" r="7" fill="#86b9ef"/>
+        <text x="278" y="170" fill="#d9e0ef" font-size="12" font-weight="600">AgentRunbook-R</text>
+        <text x="278" y="185" fill="#8f9ab2" font-size="11">58.6% · 26.9s</text>
+
+        <circle cx="440" cy="99" r="8" fill="#70e1c1" filter="url(#glow)"/>
+        <text x="318" y="84" fill="#eafdf8" font-size="12" font-weight="650">AgentRunbook-C</text>
+        <text x="318" y="99" fill="#9acfc2" font-size="11">74.9% · 108.3s</text>
+
+        <circle cx="464" cy="126" r="7" fill="#101a35" stroke="#b4bfd5" stroke-width="2"/>
+        <text x="454" y="151" fill="#c0c8d8" font-size="12" text-anchor="end" font-weight="600">Codex</text>
+        <text x="454" y="166" fill="#818ca4" font-size="11" text-anchor="end">69.9% · 177.2s</text>
+
+        <!-- Research update: not part of the released leaderboard table -->
+        <circle cx="450" cy="95" r="10" fill="none" stroke="#ffd27a" stroke-width="2" stroke-dasharray="3 3"/>
+        <path d="M450 85 L464 70" stroke="#ffd27a" stroke-opacity="0.8"/>
+        <text x="469" y="67" fill="#ffd98d" font-size="11" font-weight="650">C V2 update</text>
+        <text x="469" y="81" fill="#9e957f" font-size="10">75.61% · 130.54s</text>
+      </g>
+      <text x="24" y="370" fill="#7f8aa2" font-size="11">Solid line: released non-dominated reference frontier</text>
+      <text x="24" y="389" fill="#aa9368" font-size="11">Dashed ring: separate 2026/08 research update</text>
+    </g>
+
+    <!-- Medium tier -->
+    <g transform="translate(620 166)">
+      <rect width="520" height="402" rx="20" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.09"/>
+      <text x="24" y="36" fill="#f4f6ff" font-size="18" font-weight="650">LME-V2 Medium</text>
+      <text x="496" y="36" fill="#8995ad" font-size="12" text-anchor="end">larger trajectory haystacks</text>
+
+      <g stroke="#ffffff" stroke-opacity="0.07" stroke-width="1">
+        <line x1="72" y1="72" x2="472" y2="72"/>
+        <line x1="72" y1="125" x2="472" y2="125"/>
+        <line x1="72" y1="179" x2="472" y2="179"/>
+        <line x1="72" y1="232" x2="472" y2="232"/>
+        <line x1="72" y1="285" x2="472" y2="285"/>
+        <line x1="72" y1="72" x2="72" y2="312"/>
+        <line x1="193" y1="72" x2="193" y2="312"/>
+        <line x1="314" y1="72" x2="314" y2="312"/>
+        <line x1="435" y1="72" x2="435" y2="312"/>
+        <line x1="472" y1="72" x2="472" y2="312"/>
+      </g>
+      <g fill="#76829a" font-size="11">
+        <text x="60" y="76" text-anchor="end">80</text>
+        <text x="60" y="129" text-anchor="end">70</text>
+        <text x="60" y="183" text-anchor="end">60</text>
+        <text x="60" y="236" text-anchor="end">50</text>
+        <text x="60" y="289" text-anchor="end">40</text>
+        <text x="72" y="331" text-anchor="middle">0.1</text>
+        <text x="193" y="331" text-anchor="middle">1</text>
+        <text x="314" y="331" text-anchor="middle">10</text>
+        <text x="435" y="331" text-anchor="middle">100</text>
+        <text x="472" y="331" text-anchor="middle">200s</text>
+      </g>
+      <text x="14" y="195" fill="#76829a" font-size="11" transform="rotate(-90 14 195)">ACCURACY %</text>
+
+      <path d="M130 254 L365 195 L446 120" fill="none" stroke="url(#frontier)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <g>
+        <circle cx="130" cy="254" r="7" fill="#7c9cff" filter="url(#glow)"/>
+        <text x="141" y="247" fill="#d9e0ef" font-size="12" font-weight="600">RAG + notes</text>
+        <text x="141" y="263" fill="#8f9ab2" font-size="11">45.9% · 0.3s</text>
+
+        <circle cx="365" cy="195" r="7" fill="#86b9ef"/>
+        <text x="274" y="179" fill="#d9e0ef" font-size="12" font-weight="600">AgentRunbook-R</text>
+        <text x="274" y="194" fill="#8f9ab2" font-size="11">57.0% · 25.8s</text>
+
+        <circle cx="446" cy="120" r="8" fill="#70e1c1" filter="url(#glow)"/>
+        <text x="320" y="103" fill="#eafdf8" font-size="12" font-weight="650">AgentRunbook-C</text>
+        <text x="320" y="118" fill="#9acfc2" font-size="11">70.1% · 139.9s</text>
+
+        <circle cx="468" cy="128" r="7" fill="#101a35" stroke="#b4bfd5" stroke-width="2"/>
+        <text x="457" y="153" fill="#c0c8d8" font-size="12" text-anchor="end" font-weight="600">Codex</text>
+        <text x="457" y="168" fill="#818ca4" font-size="11" text-anchor="end">68.7% · 185.8s</text>
+      </g>
+      <text x="24" y="370" fill="#7f8aa2" font-size="11">Official released reference results; no public V2 Medium point</text>
+      <text x="24" y="389" fill="#70e1c1" font-size="11">Frontier favors AgentRunbook-C over Codex</text>
+    </g>
+
+    <!-- Status / metric definitions -->
+    <g transform="translate(60 590)">
+      <rect width="1080" height="112" rx="18" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.09"/>
+      <g transform="translate(22 20)">
+        <rect width="282" height="72" rx="14" fill="#7c9cff" fill-opacity="0.10" stroke="#7c9cff" stroke-opacity="0.25"/>
+        <text x="18" y="27" fill="#9fb4ff" font-size="12" font-weight="650" letter-spacing="1">ARGON MEMORY</text>
+        <text x="18" y="53" fill="#f4f6ff" font-size="17" font-weight="650">Official Accuracy / LAFS pending</text>
+      </g>
+      <g transform="translate(330 20)">
+        <text x="0" y="23" fill="#f0f3fa" font-size="13" font-weight="650">Accuracy</text>
+        <text x="0" y="43" fill="#8f9ab2" font-size="12">fixed reader answer score</text>
+        <text x="250" y="23" fill="#f0f3fa" font-size="13" font-weight="650">Query latency</text>
+        <text x="250" y="43" fill="#8f9ab2" font-size="12">online memory.query mean</text>
+        <text x="500" y="23" fill="#f0f3fa" font-size="13" font-weight="650">LAFS Gain</text>
+        <text x="500" y="43" fill="#8f9ab2" font-size="12">frontier gain over 1–200s</text>
+        <text x="0" y="69" fill="#748099" font-size="11">Argon’s 54.5% literal-evidence diagnostic is intentionally excluded from this accuracy chart.</text>
+      </g>
+    </g>
+    <text x="60" y="733" fill="#66738d" font-size="12">Sources: official LongMemEval-V2 results and AgentRunbook-C V2 research update · leaderboard has no third-party entries as of 2026-08-26</text>
+  </g>
+</svg>

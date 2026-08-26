@@ -16,6 +16,7 @@ import { inventorySourceRoot, parseSourceRoots, sourceFilePath, type InventoryEn
 import { CanonicalRevisionStore, type CanonicalDirectory } from "./revision-store.js";
 import { MaintenanceQueue } from "./maintenance/queue.js";
 import type { ChangePacket, MaintenancePlan } from "./maintenance/contracts.js";
+import { excerptAroundSearchQuery, rankSearchDocuments } from "./search.js";
 
 export type ProjectProfile = "upstream-full" | "project-read" | "project-contribute" | "project-resolve" | "project-ops" | "project-maintain" | "project-admin";
 export type MemoryKind = "fact" | "decision" | "procedure" | "lesson" | "constraint" | "preference" | "open_question";
@@ -819,13 +820,7 @@ export class ProjectRuntime {
   }
 
   private excerptAroundQuery(text: string, query: string | undefined, maxChars: number): { text: string; truncated: boolean } {
-    if (text.length <= maxChars) return { text, truncated: false };
-    const terms = (query ?? "").toLocaleLowerCase().split(/\s+/).filter(term => term.length >= 2);
-    const lower = text.toLocaleLowerCase();
-    const found = terms.map(term => lower.indexOf(term)).filter(index => index >= 0).sort((a, b) => a - b)[0] ?? 0;
-    const start = Math.max(0, found - Math.floor(maxChars * 0.2));
-    const end = Math.min(text.length, start + maxChars);
-    return { text: `${start > 0 ? "…\n" : ""}${text.slice(start, end)}${end < text.length ? "\n…" : ""}`, truncated: true };
+    return excerptAroundSearchQuery(text, query, maxChars);
   }
 
   async graphContext(input: {
@@ -908,26 +903,26 @@ export class ProjectRuntime {
   }
 
   async search(query: string, limit = 5, includeUnverified = false, maximumConfidentiality: Confidentiality = "internal"): Promise<Array<{ record: KnowledgeRecord; score: number; snippet: string; visual_context?: ImageAssociation[]; linked_artifacts?: LinkedArtifact[] }>> {
-    const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
     const indexed = await Promise.all((await this.records()).map(async (item) => {
       let normalized = "";
       if (item.record.type === "artifact" && typeof item.record.normalized_markdown_path === "string") {
         try { normalized = await readFile(join(this.root, item.record.normalized_markdown_path), "utf8"); } catch { /* stale derived text is excluded */ }
       }
-      return { ...item, normalized, haystack: `${item.record.title}\n${item.body}\n${normalized}\n${JSON.stringify(item.record)}`.toLocaleLowerCase() };
+      return { ...item, normalized, haystack: `${item.record.title}\n${item.body}\n${normalized}\n${JSON.stringify(item.record)}` };
     }));
-    const matches = indexed
+    const visible = indexed
       .filter(item => confidentialityAllowed(item.record, maximumConfidentiality))
       .filter(item => item.record.type !== "validation_event")
-      .filter(item => includeUnverified || item.record.status === "accepted" || item.record.type !== "memory")
-      .map(item => ({ ...item, score: terms.reduce((total, term) => total + (item.haystack.includes(term) ? 1 : 0), 0) }))
-      .filter(item => item.score > 0)
-      .sort((a, b) => b.score - a.score || a.record.title.localeCompare(b.record.title))
-      .slice(0, Math.min(limit, 20))
-      .map(item => {
+      .filter(item => includeUnverified || item.record.status === "accepted" || item.record.type !== "memory");
+    const matches = rankSearchDocuments(
+      query,
+      visible.map(item => ({ item, key: item.record.id, title: item.record.title, text: item.haystack })),
+      Math.min(limit, 20),
+    ).map(match => {
+        const item = match.item;
         const imageAssociations = item.record.type === "artifact" ? (item.record.image_associations as ImageAssociation[] | undefined) : undefined;
         const visualContext = imageAssociations?.length ? imageAssociations.slice(0, 5) : undefined;
-        return { record: item.record, score: item.score, snippet: (item.normalized || item.body).slice(0, 400), visual_context: visualContext?.length ? visualContext : undefined };
+        return { record: item.record, score: match.score, snippet: match.excerpt, visual_context: visualContext?.length ? visualContext : undefined };
       });
     return Promise.all(matches.map(async item => {
       const linkedArtifacts = item.record.type === "artifact" ? [] : await this.linkedArtifacts(item.record.id, 3, maximumConfidentiality).catch(() => []);

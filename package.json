@@ -12,6 +12,9 @@
     "dist/",
     "skills/",
     "docs/",
+    "benchmarks/README.md",
+    "benchmarks/longmemeval_v2/*.py",
+    "benchmarks/longmemeval_v2/README.md",
     "CONTRIBUTORS.md",
     "README.md",
     "README.zh-CN.md",
@@ -23,7 +26,10 @@
     "build": "node scripts/generate-skill-bundle.mjs && tsc -p tsconfig.json && cp -R src/normalization/python dist/normalization/python && chmod +x dist/cli.js",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test:search": "npm run build && node scripts/search-smoke.mjs",
+    "benchmark:check": "python3 -m py_compile benchmarks/longmemeval_v2/*.py",
+    "benchmark:smoke": "npm run build && python3 benchmarks/longmemeval_v2/smoke_test.py"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",

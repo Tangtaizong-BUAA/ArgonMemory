@@ -6,7 +6,7 @@
 
 An open-source MCP knowledge system that turns documents, agent output, decisions, and verified conversations into a persistent, evidence-aware project memory.
 
-[中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [MCP tools](docs/mcp-tools.md) · [Security](SECURITY.md)
+[中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [MCP tools](docs/mcp-tools.md) · [Benchmarks](benchmarks/README.md) · [Security](SECURITY.md)
 
 </div>
 
@@ -175,6 +175,10 @@ Argon Memory is the memory layer. Your local or hosted agent remains the reasoni
 ## Status
 
 `0.1.1` is the current standalone Argon release, extracted from a production project-memory system. The storage contract, MCP surface, provenance rules, and conflict boundaries are usable today; high-scale vector backends and additional normalizer adapters remain future work.
+
+## Public benchmark
+
+Argon Memory includes an MCP-native adapter for the official [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) Agent memory benchmark. It evaluates long-horizon web and enterprise trajectories across five memory abilities while measuring answer quality and query latency. Synthetic cases are used only as smoke gates and are never reported as benchmark scores. See [benchmarks](benchmarks/README.md) and the [reporting policy](docs/benchmarking.md).
 
 ## Lineage and license
 

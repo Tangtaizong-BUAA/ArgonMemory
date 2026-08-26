@@ -7,3 +7,6 @@ data/
 .DS_Store
 coverage/
 *.tgz
+benchmarks/.data/
+benchmarks/results/
+benchmarks/**/__pycache__/

@@ -116,6 +116,10 @@ export MINERU_API_KEY="..."
 
 Argon Memory 是持久记忆层，不替代 Codex、Qoder、Hermes 等客户端 Agent 的推理和执行能力。
 
+## 公开基准测试
+
+仓库已提供官方 [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) Agent 长期记忆基准的 MCP 原生适配器，覆盖长期 Web/Enterprise Agent 轨迹、五类记忆能力、回答质量和查询延迟。自造样例只用于接口门禁，绝不作为公开 Benchmark 分数。详见 [Benchmark 入口](benchmarks/README.md) 与 [报告规范](docs/benchmarking.md)。
+
 ## 贡献者
 
 Argon Memory 由 [Tangtaizong-BUAA](https://github.com/Tangtaizong-BUAA) 创建并主导，OpenAI Codex 作为 AI 工程协作者参与架构、实现、文档、审查和发布准备。详细角色与署名边界见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。

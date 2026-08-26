@@ -1,0 +1,60 @@
+{
+  "name": "@argon-ai/memory",
+  "version": "0.1.0",
+  "description": "A durable, evidence-aware project memory system for MCP agents.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "argon-memory": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "docs/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/generate-skill-bundle.mjs && tsc -p tsconfig.json && cp -R src/normalization/python dist/normalization/python && chmod +x dist/cli.js",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "better-sqlite3": "^12.4.5",
+    "yaml": "^2.8.2",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "agent-memory",
+    "project-memory",
+    "knowledge-base",
+    "rag",
+    "provenance",
+    "markdown",
+    "mineru"
+  ],
+  "author": "Argon AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tangtaizong-BUAA/ArgonMemory.git"
+  },
+  "homepage": "https://github.com/Tangtaizong-BUAA/ArgonMemory#readme",
+  "bugs": {
+    "url": "https://github.com/Tangtaizong-BUAA/ArgonMemory/issues"
+  }
+}

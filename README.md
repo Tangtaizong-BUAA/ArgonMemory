@@ -174,10 +174,10 @@ Argon Memory is the memory layer. Your local or hosted agent remains the reasoni
 
 ## Status
 
-`0.1.0` is the first standalone Argon release, extracted from a production project-memory system. The storage contract, MCP surface, provenance rules, and conflict boundaries are usable today; high-scale vector backends and additional normalizer adapters remain future work.
+`0.1.1` is the current standalone Argon release, extracted from a production project-memory system. The storage contract, MCP surface, provenance rules, and conflict boundaries are usable today; high-scale vector backends and additional normalizer adapters remain future work.
 
 ## Lineage and license
 
-Argon Memory was derived from project-memory work built on the MIT-licensed [MinerU Document Explorer](https://github.com/opendatalab/MinerU-Document-Explorer). It is released under the [MIT License](LICENSE) and preserves upstream attribution.
+Argon Memory was derived from project-memory work built on the MIT-licensed [MinerU Document Explorer](https://github.com/opendatalab/MinerU-Document-Explorer). Argon Memory `0.1.1` and later are released under the [Apache License 2.0](LICENSE), including an explicit patent grant. Upstream attribution and the original MIT notice are preserved in [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before opening a pull request or reporting a vulnerability.

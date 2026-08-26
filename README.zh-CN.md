@@ -116,4 +116,4 @@ export MINERU_API_KEY="..."
 
 Argon Memory 是持久记忆层，不替代 Codex、Qoder、Hermes 等客户端 Agent 的推理和执行能力。
 
-当前版本为 `0.1.0`，采用 [MIT License](LICENSE)，并保留 MinerU Document Explorer 上游项目署名。
+当前版本为 `0.1.1`。Argon Memory `0.1.1` 及后续版本采用 [Apache License 2.0](LICENSE)，允许商业使用、修改、分发和私有使用，并包含明确的专利授权。MinerU Document Explorer 的上游署名及原始 MIT 许可声明保留在 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中。

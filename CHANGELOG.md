@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add explicit human and AI collaboration attribution for Tangtaizong-BUAA and OpenAI Codex.
+- Correct the repository-local Git identity for future commits to map to the project owner's GitHub account.
+
 ## 0.1.1 — 2026-08-26
 
 - Adopt Apache License 2.0 for Argon Memory releases from 0.1.1 onward.

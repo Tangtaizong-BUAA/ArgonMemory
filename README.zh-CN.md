@@ -116,4 +116,8 @@ export MINERU_API_KEY="..."
 
 Argon Memory 是持久记忆层，不替代 Codex、Qoder、Hermes 等客户端 Agent 的推理和执行能力。
 
+## 贡献者
+
+Argon Memory 由 [Tangtaizong-BUAA](https://github.com/Tangtaizong-BUAA) 创建并主导，OpenAI Codex 作为 AI 工程协作者参与架构、实现、文档、审查和发布准备。详细角色与署名边界见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
 当前版本为 `0.1.1`。Argon Memory `0.1.1` 及后续版本采用 [Apache License 2.0](LICENSE)，允许商业使用、修改、分发和私有使用，并包含明确的专利授权。MinerU Document Explorer 的上游署名及原始 MIT 许可声明保留在 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中。

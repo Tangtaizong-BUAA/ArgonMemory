@@ -12,6 +12,7 @@
     "dist/",
     "skills/",
     "docs/",
+    "CONTRIBUTORS.md",
     "README.md",
     "README.zh-CN.md",
     "LICENSE",
@@ -50,6 +51,10 @@
     "mineru"
   ],
   "author": "Argon AI",
+  "contributors": [
+    "Tangtaizong-BUAA (project creator and lead maintainer)",
+    "OpenAI Codex (AI engineering collaborator)"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

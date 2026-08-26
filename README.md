@@ -180,6 +180,8 @@ Argon Memory is the memory layer. Your local or hosted agent remains the reasoni
 
 Argon Memory includes an MCP-native adapter for the official [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) Agent memory benchmark. It evaluates long-horizon web and enterprise trajectories across five memory abilities while measuring answer quality and query latency. Synthetic cases are used only as smoke gates and are never reported as benchmark scores. See [benchmarks](benchmarks/README.md), the [reporting policy](docs/benchmarking.md), and the first [public retrieval diagnostic](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md).
 
+[![Argon Memory LongMemEval-V2 public retrieval snapshot](docs/assets/longmemeval-v2-snapshot.svg)](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md)
+
 ## Lineage and license
 
 Argon Memory was derived from project-memory work built on the MIT-licensed [MinerU Document Explorer](https://github.com/opendatalab/MinerU-Document-Explorer). Argon Memory `0.1.1` and later are released under the [Apache License 2.0](LICENSE), including an explicit patent grant. Upstream attribution and the original MIT notice are preserved in [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

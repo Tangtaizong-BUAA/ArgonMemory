@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="title desc">
+  <title id="title">Argon Memory LongMemEval-V2 public retrieval snapshot</title>
+  <desc id="desc">A public retrieval diagnostic showing 100 of 100 trajectories indexed, 15.78 seconds to index and save, 20 of 20 non-empty contexts, 6 of 11 literal evidence coverage, and a top-six versus top-ten retrieval comparison. These are retrieval diagnostics, not answer accuracy.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07101f"/>
+      <stop offset="0.54" stop-color="#101a35"/>
+      <stop offset="1" stop-color="#11162a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7c9cff"/>
+      <stop offset="1" stop-color="#70e1c1"/>
+    </linearGradient>
+    <linearGradient id="soft" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c9cff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#70e1c1" stop-opacity="0.04"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="640" rx="30" fill="url(#background)"/>
+  <circle cx="1080" cy="74" r="98" fill="#7c9cff" opacity="0.05"/>
+  <circle cx="1080" cy="74" r="56" fill="none" stroke="#7c9cff" stroke-opacity="0.20"/>
+  <circle cx="1080" cy="74" r="6" fill="#70e1c1" filter="url(#glow)"/>
+  <path d="M976 74 C1015 30 1145 23 1170 90" fill="none" stroke="#7c9cff" stroke-opacity="0.22" stroke-dasharray="3 9"/>
+
+  <text x="60" y="62" fill="#9fb4ff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="600" letter-spacing="2.4">PUBLIC BENCHMARK SNAPSHOT</text>
+  <text x="60" y="103" fill="#f5f7ff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="31" font-weight="650">LongMemEval-V2 · Enterprise Small</text>
+  <text x="60" y="132" fill="#98a3bc" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">Retrieval diagnostic · public data only · not answer accuracy</text>
+
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <g transform="translate(60 166)">
+      <rect width="250" height="132" rx="18" fill="url(#soft)" stroke="#7795e8" stroke-opacity="0.23"/>
+      <text x="22" y="31" fill="#9aa6bf" font-size="14">PUBLIC TRAJECTORIES</text>
+      <text x="22" y="82" fill="#f6f8ff" font-size="42" font-weight="650">100/100</text>
+      <text x="22" y="108" fill="#70e1c1" font-size="14">indexed and persisted</text>
+    </g>
+    <g transform="translate(330 166)">
+      <rect width="250" height="132" rx="18" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.09"/>
+      <text x="22" y="31" fill="#9aa6bf" font-size="14">INDEX + SAVE</text>
+      <text x="22" y="82" fill="#f6f8ff" font-size="42" font-weight="650">15.78<tspan font-size="22"> s</tspan></text>
+      <text x="22" y="108" fill="#9aa6bf" font-size="14">182.3 MiB saved state</text>
+    </g>
+    <g transform="translate(600 166)">
+      <rect width="250" height="132" rx="18" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.09"/>
+      <text x="22" y="31" fill="#9aa6bf" font-size="14">NON-EMPTY CONTEXT</text>
+      <text x="22" y="82" fill="#f6f8ff" font-size="42" font-weight="650">20/20</text>
+      <text x="22" y="108" fill="#9aa6bf" font-size="14">P50 1.44 s · P95 2.47 s</text>
+    </g>
+    <g transform="translate(870 166)">
+      <rect width="270" height="132" rx="18" fill="url(#soft)" stroke="#70e1c1" stroke-opacity="0.20"/>
+      <text x="22" y="31" fill="#9aa6bf" font-size="14">LITERAL EVIDENCE</text>
+      <text x="22" y="82" fill="#f6f8ff" font-size="42" font-weight="650">6/11</text>
+      <text x="22" y="108" fill="#70e1c1" font-size="14">54.5% conservative check</text>
+    </g>
+  </g>
+
+  <g transform="translate(60 326)" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <rect width="520" height="244" rx="20" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.09"/>
+    <text x="24" y="38" fill="#f4f6ff" font-size="18" font-weight="600">Configuration ablation</text>
+    <text x="24" y="62" fill="#909bb3" font-size="13">Same 12k context budget · higher coverage is better</text>
+
+    <text x="24" y="103" fill="#dce2f1" font-size="15" font-weight="600">Top 6</text>
+    <rect x="88" y="87" width="360" height="21" rx="10.5" fill="#ffffff" fill-opacity="0.06"/>
+    <rect x="88" y="87" width="360" height="21" rx="10.5" fill="url(#accent)"/>
+    <text x="496" y="104" fill="#f4f6ff" font-size="15" font-weight="650" text-anchor="end">54.5%</text>
+
+    <text x="24" y="148" fill="#aab3c6" font-size="15">Top 10</text>
+    <rect x="88" y="132" width="360" height="21" rx="10.5" fill="#ffffff" fill-opacity="0.06"/>
+    <rect x="88" y="132" width="240" height="21" rx="10.5" fill="#7c9cff" fill-opacity="0.48"/>
+    <text x="496" y="149" fill="#aab3c6" font-size="15" text-anchor="end">36.4%</text>
+
+    <line x1="24" y1="176" x2="496" y2="176" stroke="#ffffff" stroke-opacity="0.08"/>
+    <text x="24" y="207" fill="#909bb3" font-size="13">Mean latency</text>
+    <text x="132" y="207" fill="#f4f6ff" font-size="14" font-weight="600">1.62 s</text>
+    <text x="238" y="207" fill="#909bb3" font-size="13">vs</text>
+    <text x="272" y="207" fill="#aab3c6" font-size="14">1.77 s</text>
+    <text x="496" y="207" fill="#70e1c1" font-size="13" text-anchor="end">Top 6 selected</text>
+  </g>
+
+  <g transform="translate(600 326)" font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <rect width="540" height="244" rx="20" fill="#ffffff" fill-opacity="0.035" stroke="#ffffff" stroke-opacity="0.09"/>
+    <text x="24" y="38" fill="#f4f6ff" font-size="18" font-weight="600">Public regression item · 01307e07</text>
+    <text x="24" y="62" fill="#909bb3" font-size="13">Exact ServiceNow menu evidence, no gold supplied to retrieval</text>
+
+    <g transform="translate(24 94)">
+      <rect width="174" height="82" rx="15" fill="#ff7187" fill-opacity="0.08" stroke="#ff7187" stroke-opacity="0.22"/>
+      <text x="18" y="28" fill="#ff9aaa" font-size="13">BEFORE</text>
+      <text x="18" y="57" fill="#f4f6ff" font-size="22" font-weight="650">missed top 6</text>
+    </g>
+    <path d="M218 135 H305" stroke="url(#accent)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M294 125 L306 135 L294 145" fill="none" stroke="#70e1c1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(326 94)">
+      <rect width="190" height="82" rx="15" fill="#70e1c1" fill-opacity="0.08" stroke="#70e1c1" stroke-opacity="0.28"/>
+      <text x="18" y="28" fill="#70e1c1" font-size="13">AFTER</text>
+      <text x="18" y="57" fill="#f4f6ff" font-size="22" font-weight="650">rank #1 · 3/3</text>
+    </g>
+
+    <text x="24" y="211" fill="#9aa6bf" font-size="13">Local passage ranking · corpus rarity · quoted/backticked field emphasis</text>
+  </g>
+
+  <text x="60" y="612" fill="#748099" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13">Argon Memory · a597ae6 · LongMemEval-V2 f152293 · full accuracy and LAFS pending fixed reader/evaluator</text>
+</svg>

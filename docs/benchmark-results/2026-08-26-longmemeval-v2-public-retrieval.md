@@ -2,6 +2,8 @@
 
 > **Claim level:** public retrieval diagnostic, not an official answer-accuracy or leaderboard result.
 
+![Argon Memory LongMemEval-V2 public retrieval snapshot](../assets/longmemeval-v2-snapshot.svg)
+
 This run tests Argon Memory through the official LongMemEval-V2 `Memory` interface and Argon's public Streamable HTTP MCP boundary. It measures public-data ingestion, persistence, reload, retrieval latency, context size, and narrow post-retrieval evidence presence. It does not call a reader or evaluator model.
 
 ## Reproducibility manifest

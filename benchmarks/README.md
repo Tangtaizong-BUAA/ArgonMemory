@@ -5,9 +5,12 @@ Argon Memory reports capability claims only on public, version-pinned benchmarks
 | Benchmark | Role | Coverage | Integration status |
 |---|---|---|---|
 | [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) | Primary | Long-horizon web and enterprise Agent trajectories, five memory abilities, multimodal evidence, answer quality, query latency, and the official LAFS frontier score | MCP adapter, persistence gate, and public retrieval probe implemented |
-| [MemoryAgentBench](https://github.com/HUST-AI-HYZ/MemoryAgentBench) | Secondary | Accurate retrieval, test-time learning, long-range understanding, and conflict resolution | Adapter planned after the primary run is frozen |
+| [OmniMemEval](https://github.com/MemTensor/OmniMemEval) | Cross-system matrix | Shared ingestion, retrieval, answer, and judge pipelines for LoCoMo, LongMemEval, BEAM, PersonaMem v2, and HaluMem across Mem0, Zep/Graphiti, Letta, MemOS, and other systems | Argon MCP adapter and per-project isolation gate implemented; official Argon runs pending |
+| [MemoryAgentBench](https://github.com/HUST-AI-HYZ/MemoryAgentBench) | Future agent-memory coverage | Accurate retrieval, test-time learning, long-range understanding, and conflict resolution | Adapter planned after the primary run is frozen |
 
 The primary integration is under [`longmemeval_v2/`](longmemeval_v2/). See the [benchmarking policy](../docs/benchmarking.md) for the reporting contract and the first [public retrieval diagnostic](../docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md) for bounded current evidence.
+
+The cross-system adapter is under [`omnimemeval/`](omnimemeval/). It maps each benchmark user to an isolated Argon project and uses the same public MCP surface as real clients. The final matrix will use OmniMemEval's reproduced scores only when Argon has completed the identical answer/judge configuration; vendor-reported reference scores are not mixed into that table.
 
 ## Published memory-system comparison
 

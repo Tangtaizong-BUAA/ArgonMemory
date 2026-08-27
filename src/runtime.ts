@@ -902,7 +902,7 @@ export class ProjectRuntime {
     return (await this.graphContext({ node_id: nodeId, depth: 1, artifact_mode: "metadata", max_nodes: 40, max_artifacts: limit, max_tokens: 100, maximum_confidentiality: maximumConfidentiality })).artifacts;
   }
 
-  async search(query: string, limit = 5, includeUnverified = false, maximumConfidentiality: Confidentiality = "internal"): Promise<Array<{ record: KnowledgeRecord; score: number; snippet: string; visual_context?: ImageAssociation[]; linked_artifacts?: LinkedArtifact[] }>> {
+  async search(query: string, limit = 5, includeUnverified = false, maximumConfidentiality: Confidentiality = "internal", projectId?: string): Promise<Array<{ record: KnowledgeRecord; score: number; snippet: string; visual_context?: ImageAssociation[]; linked_artifacts?: LinkedArtifact[] }>> {
     const indexed = await Promise.all((await this.records()).map(async (item) => {
       let normalized = "";
       if (item.record.type === "artifact" && typeof item.record.normalized_markdown_path === "string") {
@@ -912,6 +912,7 @@ export class ProjectRuntime {
     }));
     const visible = indexed
       .filter(item => confidentialityAllowed(item.record, maximumConfidentiality))
+      .filter(item => !projectId || item.record.project_id === projectId || item.record.id === projectId)
       .filter(item => item.record.type !== "validation_event")
       .filter(item => includeUnverified || item.record.status === "accepted" || item.record.type !== "memory");
     const matches = rankSearchDocuments(

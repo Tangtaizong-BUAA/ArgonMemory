@@ -475,7 +475,12 @@ class ArgonMemory(Memory):
         started = time.perf_counter()
         searched = self._client().call_tool(
             "kb_search",
-            {"query": query, "top_k": self.search_top_k, "include_unverified": False},
+            {
+                "project_id": self.project_id,
+                "query": query,
+                "top_k": self.search_top_k,
+                "include_unverified": False,
+            },
         )
         raw_results = searched.get("results")
         rows = [row for row in raw_results if isinstance(row, dict)] if isinstance(raw_results, list) else []

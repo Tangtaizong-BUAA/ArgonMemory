@@ -1,0 +1,126 @@
+{
+  "source": {
+    "name": "OmniMemEval reproduced results",
+    "url": "https://github.com/MemTensor/OmniMemEval/blob/main/docs/user_memory/results.md",
+    "repository_commit": "0b1ea8d28aa2d3e03ac4a6aee17b3006a131da7d",
+    "answer_model": "gpt-4.1-mini-2025-04-14",
+    "judge_model": "gpt-4o-mini-2024-07-18"
+  },
+  "systems": [
+    "Argon Memory",
+    "MemOS",
+    "EverOS",
+    "Hindsight",
+    "Letta",
+    "Zep / Graphiti",
+    "Mem0",
+    "Viking"
+  ],
+  "groups": [
+    {
+      "title": "Conversational memory",
+      "rows": [
+        {
+          "id": "locomo",
+          "label": "Long-conversation memory",
+          "benchmark": "LoCoMo · LLM-judge accuracy",
+          "values": {
+            "Argon Memory": null,
+            "MemOS": 88.83,
+            "EverOS": 82.75,
+            "Hindsight": 81.99,
+            "Letta": 77.12,
+            "Zep / Graphiti": 63.83,
+            "Mem0": 77.68,
+            "Viking": 69.33
+          }
+        },
+        {
+          "id": "longmemeval",
+          "label": "Cross-session memory",
+          "benchmark": "LongMemEval · LLM-judge accuracy",
+          "values": {
+            "Argon Memory": null,
+            "MemOS": 89.20,
+            "EverOS": 80.40,
+            "Hindsight": 72.20,
+            "Letta": 77.67,
+            "Zep / Graphiti": 79.80,
+            "Mem0": 56.00,
+            "Viking": 61.07
+          }
+        }
+      ]
+    },
+    {
+      "title": "Long-context memory",
+      "rows": [
+        {
+          "id": "beam_100k",
+          "label": "100K-context recall",
+          "benchmark": "BEAM 100K · nugget score",
+          "values": {
+            "Argon Memory": null,
+            "MemOS": 66.87,
+            "EverOS": 58.64,
+            "Hindsight": 70.22,
+            "Letta": 69.22,
+            "Zep / Graphiti": 68.70,
+            "Mem0": 70.41,
+            "Viking": 70.76
+          }
+        },
+        {
+          "id": "beam_10m",
+          "label": "10M-context recall",
+          "benchmark": "BEAM 10M · nugget score",
+          "values": {
+            "Argon Memory": null,
+            "MemOS": 56.75,
+            "EverOS": 47.73,
+            "Hindsight": 59.75,
+            "Letta": 52.30,
+            "Zep / Graphiti": 56.11,
+            "Mem0": 43.33,
+            "Viking": 58.14
+          }
+        }
+      ]
+    },
+    {
+      "title": "Personalization & reliability",
+      "rows": [
+        {
+          "id": "personamem_v2",
+          "label": "Personalized memory",
+          "benchmark": "PersonaMem v2 · rule accuracy",
+          "values": {
+            "Argon Memory": null,
+            "MemOS": 40.58,
+            "EverOS": 35.94,
+            "Hindsight": 37.98,
+            "Letta": 35.12,
+            "Zep / Graphiti": 32.34,
+            "Mem0": 36.76,
+            "Viking": 30.80
+          }
+        },
+        {
+          "id": "halumem",
+          "label": "Hallucination robustness",
+          "benchmark": "HaluMem · LLM-judge accuracy",
+          "values": {
+            "Argon Memory": null,
+            "MemOS": 80.91,
+            "EverOS": 88.66,
+            "Hindsight": 83.99,
+            "Letta": 85.43,
+            "Zep / Graphiti": 81.71,
+            "Mem0": 73.64,
+            "Viking": 77.39
+          }
+        }
+      ]
+    }
+  ]
+}

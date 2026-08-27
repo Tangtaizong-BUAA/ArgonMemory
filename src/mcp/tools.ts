@@ -115,10 +115,10 @@ export function registerProjectTools(server: McpServer, runtime: ProjectRuntime,
     title: "Project Search",
     description: "Token-efficient detail RAG over project records, maintained sections, accepted memory, and normalized artifacts. Use proactively for names, numbers, versions, exact wording, evidence, and any detail not fully established by the main file. Results include linked artifact handles.",
     annotations: { readOnlyHint: true, openWorldHint: false },
-    inputSchema: { query: z.string().min(1), top_k: z.number().min(1).max(20).optional().default(5), include_unverified: z.boolean().optional().default(false) },
-  }, async ({ query, top_k, include_unverified }) => {
+    inputSchema: { project_id: z.string().min(6).optional(), query: z.string().min(1), top_k: z.number().min(1).max(20).optional().default(5), include_unverified: z.boolean().optional().default(false) },
+  }, async ({ project_id, query, top_k, include_unverified }) => {
     if (include_unverified && !isOps(profile)) return { content: [{ type: "text", text: "include_unverified requires project-ops." }], isError: true };
-    const results = (await runtime.search(query, top_k, include_unverified, maximumConfidentiality(profile))).filter(item => visibleTo(item.record, profile));
+    const results = (await runtime.search(query, top_k, include_unverified, maximumConfidentiality(profile), project_id)).filter(item => visibleTo(item.record, profile));
     const rows = results.map(item => {
       const base = { id: item.record.id, title: item.record.title, type: item.record.type, status: item.record.status, score: item.score, snippet: item.snippet, uri: `kb://record/${encodeURIComponent(item.record.id)}`, linked_artifacts: item.linked_artifacts };
       const withVisual = item.visual_context?.length ? { ...base, visual_context: item.visual_context } : base;

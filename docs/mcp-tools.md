@@ -2,7 +2,7 @@
 
 ## Read tools
 
-`kb_sync_skill`, `kb_brief`, `kb_lookup`, `kb_search`, `kb_outline`, `kb_view`, `kb_read`, and `kb_graph_context`.
+`kb_sync_skill`, `kb_brief`, `kb_lookup`, `kb_search`, `kb_outline`, `kb_view`, `kb_read`, and `kb_graph_context`. Pass `project_id` to `kb_search` whenever a deployment contains more than one project; the server then excludes every other project's records before ranking.
 
 ## Contributor tools
 

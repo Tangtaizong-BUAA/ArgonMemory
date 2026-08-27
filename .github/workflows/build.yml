@@ -22,5 +22,5 @@ jobs:
       - run: npm run build
       - run: node scripts/search-smoke.mjs
       - run: npm run benchmark:check
-      - run: python3 benchmarks/longmemeval_v2/smoke_test.py
+      - run: npm run benchmark:smoke
       - run: NPM_CONFIG_CACHE=/tmp/argon-memory-npm-cache npm pack --dry-run

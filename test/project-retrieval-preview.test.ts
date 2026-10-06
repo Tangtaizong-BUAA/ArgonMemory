@@ -15,7 +15,10 @@ afterEach(async () => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) 
 async function fixture(): Promise<string> { const root = await mkdtemp(join(tmpdir(), "argon-memory-preview-")); roots.push(root); return root; }
 async function fakePython(root: string, body: string): Promise<string> {
   const path = join(root, "fake-python");
-  await writeFile(path, `#!${PYTHON}\nimport sys,time\nsys.stdin.buffer.read()\n${body}\n`);
+  // Linux requires an absolute interpreter in a shebang, even when the
+  // configured Python command is resolved from PATH.
+  const interpreter = execFileSync(PYTHON, ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
+  await writeFile(path, `#!${interpreter}\nimport sys,time\nsys.stdin.buffer.read()\n${body}\n`);
   await chmod(path, 0o755);
   return path;
 }

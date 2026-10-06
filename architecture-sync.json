@@ -7,7 +7,8 @@
     "Brand neutral environment, schema and ID prefixes for Argon Memory",
     "One kernel behind the existing library and HTTP entry points",
     "Replace hosted Skill adapter with the generic Argon Memory release",
-    "Package personal and collaborative deployment assets; exclude the control panel, private data and credentials"
+    "Package personal and collaborative deployment assets; exclude the control panel, private data and credentials",
+    "Resolve the actual Python interpreter in synthetic preview fixtures for Linux PATH-based launches"
   ],
   "files": [
     {
@@ -428,7 +429,7 @@
       "source": "test/project-retrieval-preview.test.ts",
       "target": "test/project-retrieval-preview.test.ts",
       "source_sha256": "3dfed7feac9b7e70b837eaddcfd8d022cca6c579db7df3b9db56f205c89499ae",
-      "target_sha256": "b53b7d5c3dfd5369cb91f9bf94ab13413006ecc5f7fd7eeb0f52a846e69bdf02"
+      "target_sha256": "bcf4890dae76294337fb18161d5c6b086fb9b97bb091c08bdb3b9855afb5b0ab"
     },
     {
       "source": "test/project-document-normalization.test.ts",

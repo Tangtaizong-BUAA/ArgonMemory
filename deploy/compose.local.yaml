@@ -1,0 +1,42 @@
+name: knowledge-local
+x-engine: &engine
+  image: argon-memory:0.2.0
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  volumes: ["knowledge-state:/state"]
+  environment: &environment
+    KB_CONFIG: /state/instance/knowledge.config.json
+    KB_CONTAINER_LISTEN: "true"
+    DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+    MINERU_API_KEY: ${MINERU_API_KEY:-}
+    TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+  read_only: true
+  tmpfs: ["/tmp:size=128m,mode=1777"]
+  security_opt: ["no-new-privileges:true"]
+  init: true
+services:
+  setup:
+    <<: *engine
+    command: ["init", "local", "--dir", "/state/instance", "--name", "${KB_PROJECT_NAME:-My personal knowledge}"]
+    profiles: ["setup"]
+  mcp:
+    <<: *engine
+    command: ["serve", "--http", "--no-workers"]
+    ports: ["127.0.0.1:8793:8793"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8793/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  indexer:
+    <<: *engine
+    command: ["indexer"]
+    restart: unless-stopped
+  maintainer:
+    <<: *engine
+    command: ["maintainer"]
+    restart: unless-stopped
+volumes:
+  knowledge-state:

@@ -17,9 +17,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python3 -m pip install -r deploy/requirements.txt
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      - run: npm test
       - run: node scripts/search-smoke.mjs
       - run: npm run benchmark:check
       - run: npm run benchmark:smoke

@@ -10,3 +10,14 @@ coverage/
 benchmarks/.data/
 benchmarks/results/
 benchmarks/**/__pycache__/
+
+my-kb/
+team-kb/
+*.private.json
+**/knowledge.config.json
+**/principals.json
+**/secrets.env
+**/invitations/
+**/mcp.http.json
+__pycache__/
+*.py[cod]

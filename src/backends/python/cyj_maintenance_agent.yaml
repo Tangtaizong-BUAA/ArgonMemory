@@ -1,0 +1,19 @@
+llm:
+  model: qwen3.7-flash
+  service: dashscope
+  dashscope_api_key:
+  dashscope_base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+generation_config:
+  stream: false
+  temperature: 0.1
+  max_tokens: 3000
+  extra_body:
+    enable_thinking: false
+# MS-Agent adds one concluding round: 1 means at most two model calls.
+max_chat_round: 1
+save_history: false
+callbacks:
+  - cyj_stop_after_plan.py
+tools:
+  plugins:
+    - tools/cyj_maintenance

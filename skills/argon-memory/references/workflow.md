@@ -1,30 +1,15 @@
-# Argon Memory MCP workflow
+# Maintenance and provider boundaries
 
-```text
-kb_sync_skill → kb_brief → kb_graph_context → kb_search as needed
-              → kb_start_work → publish/capture → kb_finish_work
-```
+Canonical knowledge is revisioned Markdown with stable record IDs. Raw files and normalized text/images remain original evidence. SQLite search indexes, vectors and maintenance queues are derived or operational data; never maintain a second competing fact store.
 
-## Retrieval
+The indexer normalizes registered documents locally, optionally submits scanned public/internal PDFs to MinerU when explicitly enabled, then rebuilds text/image projections and vectors. OCR-disabled scans have an explicit coverage gap. It does not silently discover every file on disk.
 
-- `kb_brief`: complete main file and live navigation.
-- `kb_graph_context`: a section, graph neighbours, and linked Artifact excerpts.
-- `kb_search`: detail RAG for verifiable facts.
-- `kb_lookup`: exact structured filters.
-- `kb_outline` / `kb_read`: inspect one resource without loading everything.
-- `kb_view`: compact derived timelines, deliverables, risks, and ownership views.
+The query service combines maintained structure, lexical search, enabled Qwen text/image embeddings, ranking fusion, reranking and source diversity. Evidence carries version-bound URIs, locations, continuation calls and coverage. Queries do not wait for asynchronous maintenance.
 
-## Persistence
+The maintenance service first refreshes its bounded evidence packet. Optional Jev advice relates accepted evidence to sections, after parsing and before the proposal. `shadow` records suggestions while preserving candidates; `advisory` may add eligible candidates. Neither mode writes facts, grants permissions, resolves conflicts or restricts query recall. Configuration explicitly authorizes that provider's bounded egress; it is off by default.
 
-- `kb_start_work`: durable task identity and acceptance criteria.
-- `kb_publish_resource`: small Artifact upload.
-- `kb_begin_resource_upload` → `kb_append_resource_chunk` → `kb_commit_resource_upload`: large Artifact upload.
-- `kb_capture_context`: distilled memory candidates with evidence.
-- `kb_finish_work`: idempotent closeout with outputs and unresolved items.
+In `catalog` mode, maintenance requires no model: it adds source navigation for newly parsed documents through the same Harness. It does not summarize content, synthesize facts or decide conflicts. In `qwen` mode, Qwen/MS-Agent proposes evidence-backed section/main changes. Harness checks evidence status, project boundary, source hashes, current revisions, mutable blocks and protected conflicts, then commits a canonical revision atomically. A rejected or quarantined plan does not become knowledge.
 
-## Failure boundaries
+Model keys alone do not enable providers. The deployment owner enables services in `knowledge.config.json` and supplies private environment secrets. A fully offline deployment has local parsing, structural navigation, lexical text/image-metadata retrieval and original-image reading. It cannot perform Qwen visual-semantic matching without the enabled provider and indexed vectors.
 
-- A completed work item does not imply every memory candidate was accepted.
-- A queued maintenance proposal does not imply canonical files were updated.
-- A normalized Artifact is retrievable evidence; it is not automatically an accepted project fact.
-- A conflict remains open until an authorized resolution is committed.
+Never state that every known fact was retrieved: registered visible sources, index completion and fact completeness are different measurements.

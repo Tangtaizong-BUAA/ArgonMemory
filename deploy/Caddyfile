@@ -1,0 +1,8 @@
+{$KB_DOMAIN} {
+  handle /mcp {
+    reverse_proxy mcp:8793 {
+      flush_interval -1
+    }
+  }
+  respond "Knowledge engine MCP: /mcp" 200
+}

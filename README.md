@@ -2,181 +2,98 @@
 
 # Argon Memory
 
-### Durable project memory for agents that do real work
+### Structured knowledge and evidence retrieval for agents
 
-An open-source MCP knowledge system that turns documents, agent output, decisions, and verified conversations into a persistent, evidence-aware project memory.
+A self-hosted MCP knowledge system that combines a complete project map with global text and image retrieval, source verification and durable agent work.
 
-[中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [MCP tools](docs/mcp-tools.md) · [Benchmarks](benchmarks/README.md) · [Security](SECURITY.md)
+[中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Deployment](docs/deployment.md) · [MCP tools](docs/mcp-tools.md) · [Benchmarks](benchmarks/README.md)
 
 </div>
 
----
+## Architecture upgrade · 0.2.0
 
-Most agent memory systems save chat fragments. Argon Memory maintains a project.
-
-It gives every connected agent the same compact project map, lets it retrieve exact evidence only when needed, and closes the loop by persisting durable outputs and distilled knowledge after work. Facts do not silently overwrite one another: provenance, revisions, validation state, and unresolved conflicts remain visible.
-
-## Why Argon Memory
-
-- **Project-shaped memory** — one stable main file, maintained domain sections, a knowledge graph, and linked Artifacts.
-- **Token-efficient context** — load the small project map first; retrieve sections and evidence excerpts only when the task needs them.
-- **Evidence before confidence** — accepted memory links to source records; unsupported candidates are quarantined instead of becoming facts.
-- **Durable agent closeout** — work items, generated resources, decisions, lessons, and unresolved questions survive beyond a chat session.
-- **Conflict-aware by design** — competing claims are disclosed and routed to an authorized human resolver; the model cannot silently pick a winner.
-- **Append-only history** — immutable revision manifests, SHA-256 fingerprints, audit events, and supersession instead of destructive deletion.
-- **MCP-native** — works with Codex, Claude Code, Qoder, Hermes, Cursor, or any Streamable HTTP MCP client.
-- **Model-neutral** — the query path does not require an LLM. A separate, optional maintenance worker can use the model and provider you choose.
-
-## Mental model
+Main files and maintained sections provide project orientation. Global RAG searches every visible registered source, including evidence outside the file tree. Results carry original-source locations, evidence URIs, revision-bound continuation and coverage gaps. Photos use real image pixels when the optional Qwen visual provider is enabled.
 
 ```mermaid
 flowchart LR
-  A["Agent starts a task"] --> B["Main project file"]
-  B --> C["Maintained section"]
-  C --> D["Linked Artifact evidence"]
-  C --> E["Accepted memory"]
-  D --> F["Precise answer or project work"]
-  E --> F
-  F --> G["Work closeout"]
-  G --> H["Outputs + distilled knowledge"]
-  H --> I["Validation and conflict routing"]
-  I --> B
+  L[Personal stdio or loopback HTTP] --> M[Shared MCP kernel]
+  C[Collaborative HTTPS + individual tokens] --> M
+  M --> S[Structure planner + global RAG]
+  O[Original files and Markdown revisions] --> N[Local normalization / optional MinerU]
+  N --> I[Rebuildable text and image index]
+  I --> S
+  S --> E[Evidence, locations, pages and coverage]
+  N --> Q[Async maintenance queue]
+  Q --> J[Optional Jev section advice]
+  J --> P[Catalog or Qwen proposal]
+  P --> H[Evidence and revision validation]
+  H --> O
 ```
 
-The layers have different jobs:
+Jev supplies bounded section-association advice after parsing and before maintenance proposals. It does not answer user queries or write canonical truth. Proposals pass the same source, hash, revision and conflict checks before atomic publication. Conflicts require an authorized human resolver.
 
-| Layer | Purpose |
-|---|---|
-| Main file | Stable identity, mission, current phase, navigation, and global rules |
-| Sections | Long-lived synthesis for major project domains |
-| Artifacts | Original files, normalized Markdown, images, tables, and generated deliverables |
-| Structured memory | Facts, decisions, procedures, lessons, constraints, preferences, and open questions |
-| Conflicts | Competing claims, evidence, status, resolver question, and preserved resolution history |
-| Audit and revisions | Immutable publication history and reproducible current-state pointers |
+## Two deployment modes
+
+| Mode | Entry point | Ownership |
+| --- | --- | --- |
+| Personal | Client-managed stdio, authenticated loopback HTTP, or personal Docker | One deploying owner |
+| Collaborative | Streamable HTTP behind your HTTPS endpoint | Separate reader, contributor, owner and operator tokens |
+
+Both modes use one kernel and one data format. Normal MCP clients can connect without an OpenAI plugin. Uploaded originals, normalized files, Markdown revisions and audit records stay inspectable on disk.
 
 ## Quick start
 
-Requirements: Node.js 22+; Python 3.10+ only when using the optional MinerU adapter.
+Use Node.js 22 or 24. Python 3.10+ is needed for local PDF and image processing.
 
-```bash
+```sh
 git clone https://github.com/Tangtaizong-BUAA/ArgonMemory.git
 cd ArgonMemory
-npm install
+npm ci
 npm run build
+python3 -m pip install -r deploy/requirements.txt
 
-export ARGON_MEMORY_KB_ROOT="$PWD/data"
-export ARGON_MEMORY_MCP_PROFILE="project-ops"
-export ARGON_MEMORY_ALLOW_UNAUTHENTICATED="true" # local bootstrap only
-npm start
+node dist/cli.js init local --dir ./my-kb --name "My knowledge"
 ```
 
-The MCP endpoint is `http://127.0.0.1:8793/mcp`; health is available at `http://127.0.0.1:8793/health`.
+Merge the generated `my-kb/mcp.stdio.json` into your MCP client's configuration. It starts the MCP process and its indexer/maintainer. Install the generated `my-kb/client-skill` into the client's confirmed Skill directory. It contains this instance's project ID and verifies Skill updates by actual file hashes.
 
-Bootstrap the first project with `kb_bootstrap_project`:
+For a shared server:
 
-```json
-{
-  "project_id": "project:my-product",
-  "title": "My Product",
-  "mission": "Maintain a trustworthy, durable operating memory for this product."
-}
+```sh
+node dist/cli.js init cloud --dir ./team-kb --name "Team knowledge" --public-url https://kb.example.org/mcp
+node dist/cli.js serve --config ./team-kb/knowledge.config.json --http
+node dist/cli.js member issue --config ./team-kb/knowledge.config.json --id alice --role contributor --out ./alice.private.json
 ```
 
-After bootstrap, run normal agents with the `project-contribute` profile and install the bundled [`argon-memory` Skill](skills/argon-memory/SKILL.md).
+Place your HTTPS proxy in front of loopback port 8793. Give each member their private invitation. Token revocation and role changes invalidate existing HTTP sessions. Docker configurations for both modes, client setup and provider configuration are in [deployment instructions](docs/deployment.md).
 
-## Connect an MCP client
+## Retrieval and maintenance boundaries
 
-```json
-{
-  "mcpServers": {
-    "argon_memory": {
-      "url": "http://127.0.0.1:8793/mcp",
-      "headers": {
-        "Authorization": "Bearer ${ARGON_MEMORY_TOKEN}"
-      }
-    }
-  }
-}
+- Structure guides inspection; it never narrows the global recall set to linked files.
+- Use `intent="collect"` and continuation calls for scattered evidence. Exhausting the current recall set does not prove all facts were found.
+- Inspect parsing/embedding coverage and unresolved conflicts, then read original text or pixels with `kb_read`.
+- External providers are **off by default**. Qwen enables semantic embeddings/reranking and optional maintenance; MinerU enables selected document/OCR processing; Jev enables bounded background routing advice. Without Qwen, retrieval reports its structure/lexical fallback.
+- Unchanged source normalization and embeddings are reused. Lexical projection rebuilds on corpus revision changes; new searches rerank visible candidates. Vector search currently uses exact cosine, not ANN.
+- The architecture introduction is claimed once per computer and deployment, with a persistent anonymous local identity. Clients without persistent local state skip it.
+
+One managed deployment serves one shared project. Multiple teams need separate data directories, registries and processes; this release does not claim tenant isolation inside one server.
+
+## Existing integrations and validation
+
+Root library exports and the no-argument `ARGON_MEMORY_*` HTTP entry point remain available. They delegate to the shared kernel; existing benchmark adapters are preserved. See [upgrade boundaries](docs/architecture.md#upgrade-from-01x). Qwen retrieval on the legacy HTTP entry point requires explicit `ARGON_MEMORY_QWEN_ENABLED=true`.
+
+```sh
+npm run check
+npm run build
+npm test
+npm run benchmark:smoke
 ```
 
-For a local single-user experiment, omit the header only when `ARGON_MEMORY_ALLOW_UNAUTHENTICATED=true`. Never expose unauthenticated contribute or ops profiles to a network.
-
-## The agent workflow
-
-```text
-kb_sync_skill → kb_brief → kb_graph_context → kb_search as needed
-              → kb_start_work → publish/capture → kb_finish_work
-```
-
-1. `kb_brief` loads the complete compact project map.
-2. `kb_graph_context` opens one maintained section and its linked evidence.
-3. `kb_search` retrieves precise facts, names, dates, versions, quotations, and Artifact excerpts.
-4. `kb_start_work` creates a durable task identity before material work begins.
-5. `kb_publish_resource` stores useful outputs; `kb_capture_context` submits distilled memory candidates.
-6. `kb_finish_work` records the outcome, evidence, unresolved items, and idempotent result hash.
-
-This separation avoids two common failures: flooding every prompt with the whole archive and pretending that a short summary is sufficient evidence.
-
-## Permission profiles
-
-| Profile | Intended use | Capabilities |
-|---|---|---|
-| `project-read` | Read-only clients and replicas | Brief, graph, search, lookup, read, views |
-| `project-contribute` | Normal team agents | Read tools plus work, Artifact, context, and closeout writes |
-| `project-resolve` | Project owner or designated resolver | Locks explicit human conflict resolutions for maintenance |
-| `project-ops` | Loopback operations service | Bootstrap, ingestion, normalization, lint, and health |
-
-Principal tokens are stored as SHA-256 hashes in `ARGON_MEMORY_MCP_PRINCIPALS_JSON`. Resolver access additionally requires the `project-owner` or `designated-resolver` role. A shared token never proves which human spoke.
-
-## Canonical storage
-
-Argon Memory deliberately keeps human-inspectable Markdown and YAML frontmatter as canonical truth. Search indexes and graph views are derived and rebuildable.
-
-```text
-data/
-├── registry/                 # projects, sections, work, Artifacts, conflicts
-├── memory/                   # structured memory records
-├── events/                   # durable activity records
-├── resources/                # immutable uploaded bytes
-├── normalized/               # parser-derived Markdown and media links
-├── audit/events.jsonl        # append-only audit stream
-├── maintenance/queue.sqlite  # bounded maintenance ChangePackets
-└── knowledge/
-    ├── revisions/            # immutable canonical snapshots
-    ├── indexes/              # rebuildable derived indexes
-    └── current-revision.json # atomic pointer to one consistent snapshot
-```
-
-No project data ships in this repository. The `data/` tree is created at runtime and ignored by Git.
-
-## Artifact normalization
-
-Text, Markdown, CSV, JSON, and YAML become searchable immediately. Binary documents remain immutable Artifacts until normalized.
-
-MinerU Cloud is an optional adapter:
-
-```bash
-python3 -m pip install mineru-open-sdk
-export MINERU_API_KEY="..."
-```
-
-Then an ops principal can register a source root, ingest inventory, and call `kb_parse_artifact`. The API egress is written to the audit log. Argon Memory is not coupled to MinerU's storage or model layer; other normalizers can write the same normalized Markdown contract.
-
-## What is intentionally not included
-
-- No chat UI or hosted online Agent.
-- No command runner, container workspace, or remote execution plane.
-- No project documents, user files, production database, credentials, or deployment secrets.
-- No model that answers on behalf of connected clients.
-- No test fixtures or test corpus in the published package.
-
-Argon Memory is the memory layer. Your local or hosted agent remains the reasoning and execution layer.
-
-## Status
-
-`0.1.1` is the current standalone Argon release, extracted from a production project-memory system. The storage contract, MCP surface, provenance rules, and conflict boundaries are usable today; high-scale vector backends and additional normalizer adapters remain future work.
+Acceptance cases use temporary synthetic data and mocked external providers. They cover local stdio, cloud roles/revocation, evidence pagination, original pixels, normalization, retrieval caches and guarded maintenance. They do not measure whole-corpus retrieval accuracy or a production provider's current performance.
 
 ## Public benchmark
+
+Published diagnostics below use the earlier 0.1.x retrieval implementation. The 0.2.0 architecture has not been assigned new benchmark scores.
 
 Argon Memory includes an MCP-native adapter for the official [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) Agent memory benchmark. It evaluates long-horizon web and enterprise trajectories across five memory abilities while measuring answer quality and query latency. Synthetic cases are used only as smoke gates and are never reported as benchmark scores. See [benchmarks](benchmarks/README.md), the [reporting policy](docs/benchmarking.md), and the first [public retrieval diagnostic](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md).
 

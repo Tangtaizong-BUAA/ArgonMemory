@@ -1,122 +1,62 @@
-<div align="center">
-
 # Argon Memory
 
-### 为真正参与项目工作的 Agent 提供可持续沉淀的长期记忆
+把结构化主文件的全貌、跨资料的文本与图片 RAG、原文核验和异步维护放进同一个知识内核。当前开源架构版本为 **0.2.0**。
 
-一个开源 MCP 知识系统，把文档、Agent 产出、决策和经过核证的对话信息，沉淀为可追溯、可检索、可持续维护的项目记忆。
+[English](README.md) · [架构](docs/architecture.md) · [部署指南](docs/deployment.md) · [MCP 工具](docs/mcp-tools.md)
 
-[English](README.md) · [架构](docs/architecture.md) · [MCP 工具](docs/mcp-tools.md) · [安全](SECURITY.md)
+## 本次架构升级
 
-</div>
+主文件和专题分文件帮助智能体理解项目、规划来源；全局检索在整个可见项目资料中寻找证据，不受文件树深度或章节关联限制。查询返回证据 URI、原文位置、版本、续页、解析和向量覆盖缺口，以及相关冲突。分散的实践信息可通过 collect 分页收集，再定向补查计划来源。图片检索在启用 Qwen 后处理实际像素，查询合照可返回原图。
 
----
+资料解析后进入独立维护队列。Jev 位于解析与维护提案之间，提供有预算和权限边界的章节关联建议；它不参与用户查询、不直接修改正式知识。目录维护或 Qwen 整理提案通过来源、哈希、版本与冲突校验后原子提交。冲突裁决由有权限的负责人凭明确用户指令提交。
 
-很多 Agent 记忆系统保存的是聊天片段。Argon Memory 维护的是一个项目。
+## 两种工作方式，共用内核
 
-每个接入的 Agent 会先获得同一份紧凑项目地图，再按需下钻到专题分区和原始 Artifact；工作完成后，把真正值得长期保留的产出和知识回传。事实不会因模型“觉得新版本更对”就被覆盖：来源、版本、验证状态和冲突历史始终保留。
+| 模式 | 接入方式 | 使用范围 |
+| --- | --- | --- |
+| 本机个人模式 | 客户端启动 stdio、认证 loopback HTTP 或 Docker 虚拟服务器 | 只有部署者一个 owner |
+| 云端协作模式 | 部署者自己的 HTTPS MCP 服务 | 独立成员令牌，读者、贡献者、负责人和运维分权 |
 
-## 核心能力
-
-- **项目式记忆结构**：主文件、长期分文件、知识图谱、Artifacts 和结构化记忆各司其职。
-- **节省上下文**：先加载小而稳定的项目总览，细节再进行 RAG 和证据精读。
-- **证据驱动**：无证据的候选知识进入隔离区，不会直接冒充真实项目事实。
-- **Agent 工作闭环**：工作项、交付物、决策、经验和未解决问题跨越对话长期保存。
-- **冲突不自动选边**：冲突由系统登记、披露和路由，只能由项目负责人或指定负责人明确解决。
-- **不可变历史**：使用 SHA-256、追加式审计、不可变 revision 和原子 current pointer。
-- **原生 MCP**：可接入 Codex、Claude Code、Qoder、Hermes、Cursor 及其他 MCP 客户端。
-- **模型无关**：查询链路不需要服务器模型；维护 Worker 可按部署者需要选择模型或完全关闭。
-
-## 三层读取路径
-
-```text
-主文件：项目是什么、现在处于什么阶段、去哪里找
-  ↓
-分文件：某一大块业务的长期综合认知
-  ↓
-Artifact：原始文档、图片、表格和 Agent 产出的可核验证据
-```
-
-Agent 不需要每次重新听用户介绍项目，也不需要把全库灌进上下文。涉及名字、日期、数字、版本、原文或图片时，必须继续检索 Artifact，而不是只凭摘要回答。
+不依赖 OpenAI 插件，普通 MCP 客户端也可接入。每个部署导出自己的 Skill，按实际文件哈希增量更新；架构介绍按电脑与部署实例只提示一次。没有持久本地状态时静默跳过。
 
 ## 快速开始
 
-```bash
+需要 Node.js 22 或 24。本地 PDF/图片处理需要 Python 3.10+。
+
+```sh
 git clone https://github.com/Tangtaizong-BUAA/ArgonMemory.git
 cd ArgonMemory
-npm install
+npm ci
 npm run build
-
-export ARGON_MEMORY_KB_ROOT="$PWD/data"
-export ARGON_MEMORY_MCP_PROFILE="project-ops"
-export ARGON_MEMORY_ALLOW_UNAUTHENTICATED="true" # 仅限本机首次初始化
-npm start
+python3 -m pip install -r deploy/requirements.txt
+node dist/cli.js init local --dir ./my-kb --name "我的知识库"
 ```
 
-- MCP：`http://127.0.0.1:8793/mcp`
-- 健康检查：`http://127.0.0.1:8793/health`
+将生成的 `my-kb/mcp.stdio.json` 合并到客户端 MCP 配置；安装 `my-kb/client-skill` 到客户端确认的 Skill 目录。服务和索引/维护进程由客户端管理。初始化只创建空白实例，不扫描其他电脑资料。
 
-使用 `kb_bootstrap_project` 创建首个项目：
+云端服务和成员邀请：
 
-```json
-{
-  "project_id": "project:my-product",
-  "title": "我的项目",
-  "mission": "为本项目维护可信、持久、可追溯的长期记忆。"
-}
+```sh
+node dist/cli.js init cloud --dir ./team-kb --name "团队知识库" --public-url https://kb.example.org/mcp
+node dist/cli.js serve --config ./team-kb/knowledge.config.json --http
+node dist/cli.js member issue --config ./team-kb/knowledge.config.json --id alice --role contributor --out ./alice.private.json
 ```
 
-正常团队 Agent 建议使用 `project-contribute` 权限，并安装仓库内置的 [`argon-memory` Skill](skills/argon-memory/SKILL.md)。
+配置自己的 HTTPS 反向代理。成员撤权和角色降级即时拒绝已有会话。个人与云端 Docker 模板、成员安装和密钥配置见[部署指南](docs/deployment.md)。
 
-## 默认 Agent 工作流
+## 可核查的边界
 
-```text
-kb_sync_skill → kb_brief → kb_graph_context → 主动 kb_search
-              → kb_start_work → 产物/知识回传 → kb_finish_work
-```
+外部模型默认关闭；部署者分别启用 Qwen、MinerU 与 Jev 并提供自己的密钥。未启用 Qwen 时明确回退到结构和词法检索。未解析、缺失、权限外或尚无向量的资料会保留覆盖缺口；翻完召回集合不能证明所有事实均被找到。
 
-主文件负责广泛认知，分文件负责专题综合，Artifact 负责事实证据。`kb_capture_context` 只接收精炼后的事实、决策、约束、偏好、流程、经验和开放问题，不保存整段聊天记录。
+标准化与向量按内容哈希复用；资料版本变化时词法投影仍会重建，新查询仍需排序。当前向量通道是精确余弦计算，尚未接入 ANN。一个受管部署服务一个共享项目；不同团队使用独立数据目录、registry 与服务进程。
 
-## 权限模型
+原有库导出和无参数 `ARGON_MEMORY_*` HTTP 启动方式继续可用，统一调用新内核。旧 HTTP 模式启用 Qwen 检索需明确设置 `ARGON_MEMORY_QWEN_ENABLED=true`。原有评测适配器保留，升级数据边界见[架构说明](docs/architecture.md)。
 
-| Profile | 适用对象 | 权限 |
-|---|---|---|
-| `project-read` | 只读客户端和回退节点 | 总览、图谱、检索、精读、结构视图 |
-| `project-contribute` | 普通团队 Agent | 查询 + 工作项、Artifact、上下文和关单回传 |
-| `project-resolve` | 项目负责人/指定负责人 | 提交明确的人工冲突答案 |
-| `project-ops` | 本机运维服务 | 初始化、摄取、解析、健康和校验 |
-
-公开网络部署必须使用 Bearer Token 或 principal registry；无鉴权模式只能用于本机初始化。
-
-## 数据原则
-
-- Markdown + YAML frontmatter 是 canonical truth。
-- SQLite 队列、图视图和检索索引都是可重建派生物。
-- 原文件、审计事件和冲突历史只追加，不直接删除。
-- “工作完成”不等于所有知识候选都已接受。
-- “文档已解析”不等于解析内容已经成为项目事实。
-- “维护计划已生成”不等于 canonical 主/分文件已经更新。
-
-## 可选 MinerU 解析
-
-```bash
-python3 -m pip install mineru-open-sdk
-export MINERU_API_KEY="..."
-```
-
-运维身份可登记受控源目录、摄取文件并调用 `kb_parse_artifact`。原始文件保留，规范化 Markdown 和外发审计单独保存。
-
-## 本仓库不包含
-
-- 不包含网页端、在线问答 Agent 或聊天 UI。
-- 不包含 Shell Runner、容器工作区或远程命令执行系统。
-- 不包含任何项目资料、用户文件、生产数据库、Token 或私钥。
-- 不包含测试语料和测试文件。
-- 不在服务器替团队 Agent 回答问题。
-
-Argon Memory 是持久记忆层，不替代 Codex、Qoder、Hermes 等客户端 Agent 的推理和执行能力。
+合成验收覆盖个人 stdio、协作权限与撤权、证据续页、原图读取、解析、缓存与维护校验，不等同于真实全语料检索准确率。此同步包含通用代码、配置模板和文档。
 
 ## 公开基准测试
+
+下述已发布诊断来自 0.1.x 的旧检索实现。本次 0.2.0 架构升级尚未运行新的完整基准，不沿用旧成绩宣称提升。
 
 仓库已提供官方 [LongMemEval-V2](https://github.com/xiaowu0162/LongMemEval-V2) Agent 长期记忆基准的 MCP 原生适配器，覆盖长期 Web/Enterprise Agent 轨迹、五类记忆能力、回答质量和查询延迟。自造样例只用于接口门禁，绝不作为公开 Benchmark 分数。详见 [Benchmark 入口](benchmarks/README.md)、[报告规范](docs/benchmarking.md) 与首份[公开检索诊断](docs/benchmark-results/2026-08-26-longmemeval-v2-public-retrieval.md)。
 
@@ -130,4 +70,4 @@ Argon Memory 是持久记忆层，不替代 Codex、Qoder、Hermes 等客户端 
 
 Argon Memory 由 [Tangtaizong-BUAA](https://github.com/Tangtaizong-BUAA) 创建并主导，OpenAI Codex 作为 AI 工程协作者参与架构、实现、文档、审查和发布准备。详细角色与署名边界见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
 
-当前版本为 `0.1.1`。Argon Memory `0.1.1` 及后续版本采用 [Apache License 2.0](LICENSE)，允许商业使用、修改、分发和私有使用，并包含明确的专利授权。MinerU Document Explorer 的上游署名及原始 MIT 许可声明保留在 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中。
+当前版本为 `0.2.0`。Argon Memory `0.1.1` 及后续版本采用 [Apache License 2.0](LICENSE)，允许商业使用、修改、分发和私有使用，并包含明确的专利授权。MinerU Document Explorer 的上游署名及原始 MIT 许可声明保留在 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中。

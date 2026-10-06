@@ -1,0 +1,7 @@
+{
+  "0.1.0": {
+    "SKILL.md": "fb6864afbb52cb45a0703a3ce4ea0c4c16ea181fc842f8fe6c3caaceb7995193",
+    "agents/openai.yaml": "61d82bc39256e95ab2ab23f18dae17289548e418202f0779cc71343d26123534",
+    "references/workflow.md": "1d18435d05a245d2eb262536ea3dd78a1b90525a8af140b4bc55903fce44bf91"
+  }
+}

@@ -1,12 +1,4 @@
 interface:
   display_name: "Argon Memory"
-  short_description: "Persistent, evidence-aware project memory for MCP agents"
-  default_prompt: "Use $argon-memory to load the project map, retrieve precise evidence, complete the task, and persist only durable outputs and distilled knowledge."
-dependencies:
-  tools:
-    - type: "mcp"
-      value: "argon_memory"
-      description: "Argon Memory MCP server"
-      transport: "streamable_http"
-policy:
-  allow_implicit_invocation: true
+  short_description: "Retrieve evidence and contribute to your self-hosted knowledge base"
+  default_prompt: "Use the configured argon-memory MCP and this installation's deployment.json. Synchronize the Skill, read the project brief, retrieve and verify source evidence, then close out durable work."

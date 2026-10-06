@@ -1,0 +1,16 @@
+.git
+node_modules
+dist
+my-kb
+team-kb
+data
+benchmarks/.data
+benchmarks/results
+*.private.json
+**/principals.json
+**/secrets.env
+**/invitations
+**/mcp.http.json
+.env*
+**/__pycache__
+**/*.pyc

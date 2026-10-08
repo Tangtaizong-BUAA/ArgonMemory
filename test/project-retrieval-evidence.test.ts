@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -21,6 +22,30 @@ async function fixture(fn: (root: string) => Promise<void>): Promise<void> {
 async function file(root: string, path: string, value: Buffer | string): Promise<void> { await mkdir(dirname(join(root, path)), { recursive: true }); await writeFile(join(root, path), value); }
 
 describe("source evidence corpus", () => {
+  test("indexes an 8 MiB inline image under a bounded heap without shifting evidence or modifying its source", async () => fixture(async root => {
+    const payload = "A".repeat(4 * 1024 * 1024);
+    const text = `# Source\r\n![scan](data:image/png;base64,${payload}\r\n${payload})\r\n## Final\r\nFINAL_INLINE_EVIDENCE\n`;
+    const path = "normalized/inline/document.md";
+    await file(root, path, text);
+    const items = [{ record: record({ normalized_markdown_path: path }), body: "" }];
+    const worker = `
+      import { buildEvidenceCorpus } from ${JSON.stringify(new URL("../src/project/retrieval/evidence.ts", import.meta.url).href)};
+      const corpus = await buildEvidenceCorpus(${JSON.stringify(root)}, ${JSON.stringify(items)}, "inline-revision");
+      const hit = corpus.units.find(unit => unit.kind === "text" && unit.text.includes("FINAL_INLINE_EVIDENCE"));
+      console.log(JSON.stringify({
+        fact_offset: hit ? hit.locator.start_char + hit.text.indexOf("FINAL_INLINE_EVIDENCE") : null,
+        fact_line: hit ? hit.locator.start_line + hit.text.slice(0, hit.text.indexOf("FINAL_INLINE_EVIDENCE")).split("\\n").length - 1 : null,
+        payload_exposed: corpus.units.some(unit => unit.text.includes("A".repeat(128)))
+      }));
+    `;
+    const child = spawnSync(process.execPath, ["--max-old-space-size=192", "--import", "tsx", "--input-type=module", "-e", worker], {
+      encoding: "utf8", timeout: 30_000, env: { ...process.env, NODE_OPTIONS: "" },
+    });
+    expect(child.status, child.error?.message ?? child.stderr.slice(-2000)).toBe(0);
+    expect(JSON.parse(child.stdout)).toEqual({ fact_offset: text.indexOf("FINAL_INLINE_EVIDENCE"), fact_line: 5, payload_exposed: false });
+    expect(sha(await readFile(join(root, path)))).toBe(sha(text));
+  }), 40_000);
+
   test("covers the entire long document including its last fact, with stable source locators", async () => fixture(async root => {
     const text = `# Survey\n## Page 1\n${"墙体采样测量记录。\n".repeat(430)}## Page 2\n### 最后结论\nFINAL_UNIQUE_FACT_仅在文尾\n`;
     await file(root, "normalized/deep/document.md", text);

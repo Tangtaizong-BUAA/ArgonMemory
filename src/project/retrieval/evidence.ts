@@ -126,7 +126,10 @@ function markdownImages(text: string): MarkdownImage[] {
 
 /** Replace embedded bytes with spaces so original line and character locations survive. */
 function searchableText(text: string): string {
-  return text.replace(/data:image\/[^\s;,]+;base64,[A-Za-z0-9+/=\r\n]+/gi, value => value.replace(/[^\r\n]/g, " "));
+  // A per-character replacement allocates millions of intermediate pieces for
+  // embedded scans. Mask contiguous runs while preserving UTF-16 offsets and
+  // CR/LF positions used by evidence locators.
+  return text.replace(/data:image\/[^\s;,]+;base64,[A-Za-z0-9+/=\r\n]+/gi, value => value.replace(/[^\r\n]+/g, run => " ".repeat(run.length)));
 }
 
 function locatorAt(text: string): (start: number, end: number) => EvidenceLocator {

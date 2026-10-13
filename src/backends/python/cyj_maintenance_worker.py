@@ -9,6 +9,9 @@ SQL, or general network tool. DashScope is the only live network dependency.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import hashlib
 import json
 import os
 import sys
@@ -20,6 +23,9 @@ HARNESS_VERSION = "0.5.0"
 PROMPT_VERSION = "argon-memory-maintenance/0.5.0"
 TOOL_SCHEMA_VERSION = "argon-memory-maintenance-tools/0.5.0"
 DEFAULT_MODEL = "qwen3.7-flash"
+MAX_MEDIA_BYTES = 8 * 1024 * 1024
+MAX_PACKET_MEDIA_BYTES = 16 * 1024 * 1024
+MAX_REQUEST_BYTES = 25 * 1024 * 1024
 
 # Keep framework scratch history/logs outside the project and remove them when
 # this isolated worker exits. Canonical state is supplied only through stdio.
@@ -75,7 +81,46 @@ def _extract_json(value: Any) -> dict[str, Any]:
     return parsed
 
 
+def _validate_media_budget(packet: dict[str, Any]) -> None:
+    """Admit decoded media independently of text tokens, before any provider call.
+
+    URLs are not forwarded to a provider: their declared size cannot establish
+    the size/hash of the response. A future URL bridge must download with an
+    enforced byte limit and produce an integrity-checked inline descriptor.
+    """
+    budget = packet.get("budget", {})
+    media = packet.get("media", [])
+    limit = budget.get("max_multimodal_bytes", MAX_PACKET_MEDIA_BYTES)
+    assets = budget.get("max_multimodal_assets", 12)
+    if type(limit) is not int or not 0 <= limit <= MAX_PACKET_MEDIA_BYTES or type(assets) is not int or not 0 <= assets <= 12:
+        raise ValueError("invalid maintenance media admission budget")
+    if not isinstance(media, list) or len(media) > assets:
+        raise ValueError("maintenance media asset budget exceeded before model call")
+    total = 0
+    for item in media:
+        size = item.get("size_bytes")
+        if type(size) is not int or not 0 < size <= MAX_MEDIA_BYTES:
+            raise ValueError("maintenance media byte limit exceeded before model call")
+        if item.get("transport") == "base64_data_uri":
+            value = item.get("value", "")
+            prefix = f"data:{item.get('mime_type')};base64,"
+            if not isinstance(value, str) or not value.startswith(prefix) or len(value) - len(prefix) > 4 * ((MAX_MEDIA_BYTES + 2) // 3):
+                raise ValueError("invalid or oversized maintenance media data URI")
+            try:
+                decoded = base64.b64decode(value[len(prefix):], validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("invalid maintenance media base64") from exc
+            if len(decoded) != size or hashlib.sha256(decoded).hexdigest() != item.get("sha256"):
+                raise ValueError("maintenance media integrity or declared size mismatch")
+        else:
+            raise ValueError("maintenance media URLs require bounded download and integrity verification before model admission")
+        total += size
+        if total > limit:
+            raise ValueError("maintenance media byte budget exceeded before model call")
+
+
 def _content(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    _validate_media_budget(packet)
     prompt = {
         "role": "knowledge_maintenance_planner",
         "rules": [
@@ -109,6 +154,11 @@ def _content(packet: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def _live_plan(packet: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+    # Enforce both resource dimensions before loading or invoking the provider.
+    content = _content(packet)
+    text_chars = sum(len(item.get("text", "")) for item in content if item.get("type") == "text")
+    if (text_chars + 3) // 4 > packet["budget"]["max_context_tokens_per_step"]:
+        raise RuntimeError("maintenance step context budget exceeded before model call")
     api_key = os.environ.get("DASHSCOPE_API_KEY", "")
     if not api_key:
         raise RuntimeError("DASHSCOPE_API_KEY is required for live maintenance mode")
@@ -149,10 +199,6 @@ async def _live_plan(packet: dict[str, Any], options: dict[str, Any]) -> dict[st
     config.max_chat_round = 1
     # The only external plugin is the bundled, hash-verified tools/cyj_maintenance.py.
     agent = LLMAgent(config=config, tag="cyj_knowledge_maintainer", trust_remote_code=True)
-    content = _content(packet)
-    text_chars = sum(len(item.get("text", "")) for item in content if item.get("type") == "text")
-    if text_chars // 4 > packet["budget"]["max_context_tokens_per_step"]:
-        raise RuntimeError("maintenance step context budget exceeded before model call")
     # MS-Agent 1.6 history handling expects the standard [system, user] pair.
     messages = [
         Message(
@@ -216,8 +262,10 @@ async def _handle(request: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _main() -> None:
-    for line in sys.stdin:
+    while line := sys.stdin.readline(MAX_REQUEST_BYTES + 1):
         try:
+            if len(line.encode("utf-8")) > MAX_REQUEST_BYTES:
+                raise ValueError("maintenance worker request byte limit exceeded")
             request = json.loads(line)
             response = await _handle(request)
         except Exception as exc:  # fail closed at the process boundary

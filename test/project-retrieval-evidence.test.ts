@@ -157,7 +157,7 @@ describe("source evidence corpus", () => {
     expect(await readFile(join(root, originalPath), "utf8")).toBe(markdown);
   }));
 
-  test("resolves original Markdown parent-relative images anywhere inside the knowledge root and prefers valid normalized pixels", async () => fixture(async root => {
+  test("rejects original Markdown parent-relative images outside its resource directory and prefers valid normalized pixels", async () => fixture(async root => {
     const markdown = "# Survey\n![](../images/parent.png)\n![](../../shared/shared.png)\n![](images/primary.png)\n";
     await file(root, "normalized/legacy/document.md", markdown);
     await file(root, "sources/site/notes/report.md", markdown);
@@ -169,12 +169,10 @@ describe("source evidence corpus", () => {
     await file(root, "ingestion/source-roots.yaml", "source_roots:\n  - id: source-fixture\n    project_id: project:fixture\n    relative_path: sources/site\n");
     const corpus = await buildEvidenceCorpus(root, [{ record: record({ normalized_markdown_path: "normalized/legacy/document.md", original_relative_path: "notes/report.md", source_root_id: "source-fixture" }), body: "" }], "revision");
     const images = corpus.units.filter(unit => unit.kind === "image");
-    expect(images).toHaveLength(3);
-    expect(images[0]!.image_path).toContain("sources/site/images/parent.png");
-    expect(images[1]!.image_path).toContain("sources/shared/shared.png");
-    expect(images[2]!.image_path).toContain("normalized/legacy/images/primary.png");
-    expect(images[2]!.image_sha256).toBe(sha(primaryBytes));
-    expect(corpus.coverage.unavailable_images).toEqual([]);
+    expect(images).toHaveLength(1);
+    expect(images[0]!.image_path).toContain("normalized/legacy/images/primary.png");
+    expect(images[0]!.image_sha256).toBe(sha(primaryBytes));
+    expect(corpus.coverage.unavailable_images).toEqual(["artifact:fixture#image-0", "artifact:fixture#image-1"]);
   }));
 
   test("legacy fallback rejects outside-root targets, protocols, symlink images and symlink directories without any fetch", async () => fixture(async root => {
@@ -242,8 +240,13 @@ describe("source evidence corpus", () => {
 
   test("supports reference and HTML images while keeping non-artifact structured facts searchable", async () => fixture(async root => {
     await file(root, "pictures/numbered.png", PNG);
-    const corpus = await buildEvidenceCorpus(root, [{ record: record({ id: "section:fixture", type: "knowledge_section", status: "active", statement: "结构化字段中的独有事实", confidentiality: "secret" }), body: "# 图片索引\n![现场][photo]\n[photo]: pictures/numbered.png\n<img src=\"pictures/numbered.png\" alt=\"另一处墙体\">" }], "revision");
-    expect(corpus.units.filter(unit => unit.kind === "image")).toHaveLength(2);
+    const corpus = await buildEvidenceCorpus(root, [
+      { record: record({ id: "section:fixture", type: "knowledge_section", status: "active", statement: "结构化字段中的独有事实", confidentiality: "secret" }), body: "# 图片索引\n![现场][photo]\n[photo]: pictures/numbered.png\n<img src=\"pictures/numbered.png\" alt=\"另一处墙体\">" },
+      { record: record({ id: "artifact:registered-photo", mime_type: "image/png", managed_relative_path: "pictures/numbered.png", confidentiality: "secret" }), body: "" },
+    ], "revision");
+    const references = corpus.units.filter(unit => unit.kind === "image" && unit.record_id === "section:fixture");
+    expect(references).toHaveLength(2);
+    expect(references.every(unit => unit.image_artifact_id === "artifact:registered-photo")).toBe(true);
     expect(corpus.units.some(unit => unit.text.includes("结构化字段中的独有事实"))).toBe(true);
     expect(corpus.units.every(unit => unit.confidentiality === "secret")).toBe(true);
   }));

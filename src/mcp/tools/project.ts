@@ -1,8 +1,8 @@
 /** Low-token MCP tools for the Changyi Jiuan project profile. */
 
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, open, opendir, readFile, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -11,6 +11,7 @@ import { readRunnerImportCapability } from "../../project/runner-import.js";
 import { PROJECT_VIEW_KINDS } from "../../project/views.js";
 import { syncProjectSkill, type ProjectClientRelease } from "../../project/client-skill.js";
 import { deliverClientNotice } from "../../project/client-notices.js";
+import { conflictResolutionDecisionSchema } from "../../project/maintenance/contracts.js";
 import { outlineText, readTextSlice } from "../../project/retrieval/reading.js";
 import { controlText } from "../project-client-guidance.js";
 
@@ -29,21 +30,114 @@ const generatedResource = z.object({
 });
 const CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_CHUNKED_RESOURCE_BYTES = 100 * 1024 * 1024;
-const UPLOAD_ROOT = join(tmpdir(), "argon-memory-mcp-uploads");
+export const CHUNK_UPLOAD_LIMITS = Object.freeze({ perPrincipalCount: 4, perPrincipalBytes: 200 * 1024 * 1024, totalCount: 16, totalBytes: 512 * 1024 * 1024, ttlMs: 30 * 60 * 1000, sweepMs: 60 * 1000 });
+const UPLOAD_BASE = join(tmpdir(), "argon-memory-mcp-uploads");
+const UPLOAD_ROOT = join(UPLOAD_BASE, `process-${process.pid}-${randomUUID()}`);
 type ChunkUpload = {
-  id: string; work_id: string; actor: string; title: string; filename: string; content_type: z.infer<typeof generatedResource>["content_type"];
+  id: string; work_id: string; actor: string; root: string; busy: boolean; title: string; filename: string; content_type: z.infer<typeof generatedResource>["content_type"];
   kind: z.infer<typeof generatedResource>["kind"]; source_refs?: string[]; confidentiality: "public" | "internal" | "restricted";
   expected_size: number; expected_sha256: string; received_size: number; path: string; expires_at: number;
 };
 const chunkUploads = new Map<string, ChunkUpload>();
+let uploadSweeper: ReturnType<typeof setInterval> | undefined;
+let uploadDirectoryReady: Promise<void> | undefined;
+let orphanCleanup: Promise<void> | undefined;
 
 async function cleanupChunkUploads(): Promise<void> {
   const now = Date.now();
-  for (const [id, upload] of chunkUploads) {
+  for (const upload of chunkUploads.values()) {
     if (upload.expires_at > now) continue;
-    chunkUploads.delete(id);
-    await rm(upload.path, { force: true }).catch(() => undefined);
+    if (upload.busy) {
+      // Revoke and remove expired input, but retain its reservation while an
+      // in-flight publisher may still hold the resource bytes in memory.
+      upload.expires_at = 0;
+      await rm(upload.path, { force: true });
+      continue;
+    }
+    await discardChunkUpload(upload);
   }
+}
+
+async function discardChunkUpload(upload: ChunkUpload): Promise<void> {
+  // Revoke access immediately; release reserved bytes only after removal.
+  upload.expires_at = 0;
+  await rm(upload.path, { force: true });
+  if (chunkUploads.get(upload.id) === upload) chunkUploads.delete(upload.id);
+}
+
+function reserveChunkUpload(upload: ChunkUpload): void {
+  let totalBytes = 0, ownBytes = 0, ownCount = 0;
+  for (const item of chunkUploads.values()) {
+    totalBytes += item.expected_size;
+    if (item.actor === upload.actor && item.root === upload.root) { ownBytes += item.expected_size; ownCount++; }
+  }
+  if (chunkUploads.size >= CHUNK_UPLOAD_LIMITS.totalCount || totalBytes + upload.expected_size > CHUNK_UPLOAD_LIMITS.totalBytes) throw new Error("Global chunked upload capacity reached");
+  if (ownCount >= CHUNK_UPLOAD_LIMITS.perPrincipalCount || ownBytes + upload.expected_size > CHUNK_UPLOAD_LIMITS.perPrincipalBytes) throw new Error("Principal chunked upload capacity reached");
+  // No await between the check and reservation: simultaneous begin requests
+  // count pending file creation as well as established uploads.
+  chunkUploads.set(upload.id, upload);
+  startUploadSweeper();
+}
+
+function startUploadSweeper(): void {
+  uploadSweeper ??= setInterval(() => {
+    void cleanupChunkUploads().catch(() => undefined);
+    void cleanupOrphanUploads().catch(() => undefined);
+  }, CHUNK_UPLOAD_LIMITS.sweepMs);
+  uploadSweeper.unref();
+}
+
+async function prepareUploadDirectory(): Promise<void> {
+  uploadDirectoryReady ??= (async () => {
+    await mkdir(UPLOAD_ROOT, { recursive: true, mode: 0o700 });
+    startUploadSweeper();
+    void cleanupOrphanUploads().catch(() => undefined);
+  })().catch(error => { uploadDirectoryReady = undefined; throw error; });
+  return uploadDirectoryReady;
+}
+
+async function cleanupOrphanUploads(): Promise<void> {
+  if (orphanCleanup) return orphanCleanup;
+  orphanCleanup = (async () => {
+    // Only a dead process makes another instance's directory orphaned. A live
+    // owner's own sweeper manages its TTL and in-flight publication reservations.
+    // The pre-quota flat layout has no owner, so retain its stale-file cleanup.
+    const cutoff = Date.now() - CHUNK_UPLOAD_LIMITS.ttlMs;
+    const entries = await opendir(UPLOAD_BASE);
+    for await (const entry of entries) {
+      const path = join(UPLOAD_BASE, entry.name);
+      if (path === UPLOAD_ROOT) continue;
+      if (entry.isFile() && /^resource_upload_argon_[a-f0-9]+\.bin$/.test(entry.name)) {
+        const info = await stat(path).catch(() => null);
+        if (info && info.mtimeMs <= cutoff) await rm(path, { force: true });
+      } else if (entry.isDirectory() && /^process-\d+-[a-f0-9-]+$/.test(entry.name)) {
+        const ownerPid = Number(/^process-(\d+)-/.exec(entry.name)![1]);
+        let orphaned = false;
+        try { process.kill(ownerPid, 0); }
+        catch (error) { orphaned = (error as NodeJS.ErrnoException).code === "ESRCH"; }
+        // This includes other module instances in the current process. Errors
+        // other than ESRCH cannot establish that an owner has exited.
+        if (!orphaned) continue;
+        const files = await opendir(path);
+        for await (const file of files) {
+          if (!file.isFile() || !/^resource_upload_argon_[a-f0-9]+\.bin$/.test(file.name)) continue;
+          const candidate = join(path, file.name);
+          const info = await stat(candidate).catch(() => null);
+          if (info) await rm(candidate, { force: true });
+        }
+        await rmdir(path).catch(() => undefined);
+      }
+    }
+  })().finally(() => { orphanCleanup = undefined; });
+  return orphanCleanup;
+}
+
+function acquireChunkUpload(id: string, actor: string, root: string): ChunkUpload {
+  const upload = chunkUploads.get(id);
+  if (!upload || upload.actor !== actor || upload.root !== resolve(root) || upload.expires_at <= Date.now()) throw new Error("Unknown or expired chunked upload");
+  if (upload.busy) throw new Error("Chunked upload operation is already in progress");
+  upload.busy = true;
+  return upload;
 }
 const isOps = (profile: ProjectProfile) => profile === "project-ops" || profile === "project-admin";
 const isLegacyWriter = (profile: ProjectProfile) => profile === "project-maintain" || profile === "project-admin";
@@ -106,7 +200,7 @@ export function registerProjectTools(server: McpServer, runtime: ProjectRuntime,
       notice_id: z.string().max(80).optional(),
     },
   }, async input => {
-    const output = await deliverClientNotice(runtime.root, input, release?.notice);
+    const output = await deliverClientNotice(runtime.root, input, release?.notice, actor);
     return textResult(`Client notice control (server-generated):\n${JSON.stringify(output)}\n${output.display ? "Tell the user this message once, then mark shown locally and acknowledge. Continue their current task." : "Do not announce anything to the user. Continue their current task."}`, output);
   });
 
@@ -284,6 +378,9 @@ export function registerProjectTools(server: McpServer, runtime: ProjectRuntime,
   });
 
   if (profile === "project-read") return;
+  // Writer startup also collects leftovers from a prior process. The timer
+  // remains active even if this process never receives another upload call.
+  void prepareUploadDirectory().catch(() => undefined);
 
   server.registerTool("kb_start_work", {
     title: "Start Project Work",
@@ -383,17 +480,24 @@ export function registerProjectTools(server: McpServer, runtime: ProjectRuntime,
       source_refs: z.array(z.string()).max(50).optional(), confidentiality: z.enum(["public", "internal", "restricted"]).optional().default("internal"),
     },
   }, async (input) => {
+    let upload: ChunkUpload | undefined;
     try {
       await cleanupChunkUploads();
       const workItem = await runtime.get(input.work_id);
       if (!workItem?.record || workItem.record.type !== "work_item") throw new Error(`Unknown work item: ${input.work_id}`);
-      await mkdir(UPLOAD_ROOT, { recursive: true });
       const id = `resource_upload:argon:${randomUUID().replace(/-/g, "")}`;
       const path = join(UPLOAD_ROOT, `${id.replace(/[^A-Za-z0-9._-]/g, "_")}.bin`);
-      await writeFile(path, Buffer.alloc(0), { mode: 0o600 });
-      chunkUploads.set(id, { id, ...input, actor, received_size: 0, path, expires_at: Date.now() + 30 * 60 * 1000 });
-      return textResult(`Chunked upload ${id} ready; chunk_bytes=${CHUNK_BYTES}.`, { upload_id: id, chunk_bytes: CHUNK_BYTES, expected_size: input.expected_size, expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() });
+      const pending: ChunkUpload = { id, ...input, actor, root: resolve(runtime.root), busy: true, received_size: 0, path, expires_at: Date.now() + CHUNK_UPLOAD_LIMITS.ttlMs };
+      reserveChunkUpload(pending);
+      upload = pending;
+      await prepareUploadDirectory();
+      if (chunkUploads.get(id) !== upload || upload.expires_at <= Date.now()) throw new Error("Chunked upload expired during initialization");
+      await writeFile(path, Buffer.alloc(0), { mode: 0o600, flag: "wx" });
+      if (chunkUploads.get(id) !== upload || upload.expires_at <= Date.now()) throw new Error("Chunked upload expired during initialization");
+      upload.busy = false;
+      return textResult(`Chunked upload ${id} ready; chunk_bytes=${CHUNK_BYTES}.`, { upload_id: id, chunk_bytes: CHUNK_BYTES, expected_size: input.expected_size, expires_at: new Date(upload.expires_at).toISOString() });
     } catch (error) {
+      if (upload) await discardChunkUpload(upload).catch(() => undefined);
       return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true };
     }
   });
@@ -404,22 +508,38 @@ export function registerProjectTools(server: McpServer, runtime: ProjectRuntime,
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: { upload_id: z.string(), offset: z.number().int().min(0), content_base64: z.string().min(4).max(5_700_000) },
   }, async ({ upload_id, offset, content_base64 }) => {
+    let upload: ChunkUpload | undefined;
     try {
       await cleanupChunkUploads();
-      const upload = chunkUploads.get(upload_id);
-      if (!upload || upload.actor !== actor) throw new Error("Unknown or expired chunked upload");
+      upload = acquireChunkUpload(upload_id, actor, runtime.root);
       if (offset !== upload.received_size) throw new Error(`Chunk offset mismatch: expected ${upload.received_size}, received ${offset}`);
       const compact = content_base64.replace(/\s+/g, "");
       if (compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(compact)) throw new Error("Invalid base64 upload chunk");
       const bytes = Buffer.from(compact, "base64");
       if (!bytes.length || bytes.length > CHUNK_BYTES) throw new Error(`Chunk must contain 1-${CHUNK_BYTES} decoded bytes`);
       if (upload.received_size + bytes.length > upload.expected_size) throw new Error("Chunk exceeds declared resource size");
-      await appendFile(upload.path, bytes);
+      const file = await open(upload.path, "r+");
+      try {
+        let written = 0;
+        while (written < bytes.length) {
+          const { bytesWritten } = await file.write(bytes, written, bytes.length - written, offset + written);
+          if (!bytesWritten) throw new Error("Unable to write upload chunk");
+          written += bytesWritten;
+        }
+      } catch (error) {
+        await discardChunkUpload(upload).catch(() => undefined);
+        throw error;
+      } finally { await file.close(); }
+      if (chunkUploads.get(upload_id) !== upload || upload.expires_at <= Date.now()) throw new Error("Chunked upload expired during write");
       upload.received_size += bytes.length;
-      upload.expires_at = Date.now() + 30 * 60 * 1000;
       return textResult(`Chunk accepted; received=${upload.received_size}/${upload.expected_size}.`, { upload_id, received_size: upload.received_size, expected_size: upload.expected_size, complete: upload.received_size === upload.expected_size });
     } catch (error) {
       return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true };
+    } finally {
+      if (upload) {
+        upload.busy = false;
+        if (upload.expires_at <= Date.now()) await discardChunkUpload(upload).catch(() => undefined);
+      }
     }
   });
 
@@ -429,24 +549,30 @@ export function registerProjectTools(server: McpServer, runtime: ProjectRuntime,
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: { upload_id: z.string() },
   }, async ({ upload_id }) => {
+    let upload: ChunkUpload | undefined;
+    let committing = false;
     try {
       await cleanupChunkUploads();
-      const upload = chunkUploads.get(upload_id);
-      if (!upload || upload.actor !== actor) throw new Error("Unknown or expired chunked upload");
+      upload = acquireChunkUpload(upload_id, actor, runtime.root);
       if (upload.received_size !== upload.expected_size) throw new Error(`Upload incomplete: ${upload.received_size}/${upload.expected_size} bytes`);
+      committing = true;
       const bytes = await readFile(upload.path);
       const sha256 = createHash("sha256").update(bytes).digest("hex");
-      if (sha256 !== upload.expected_sha256) throw new Error("Upload SHA-256 mismatch");
-      const output = await runtime.publishResource({
+      if (bytes.length !== upload.expected_size || sha256 !== upload.expected_sha256) throw new Error("Upload size or SHA-256 mismatch");
+      if (chunkUploads.get(upload_id) !== upload || upload.expires_at <= Date.now()) throw new Error("Chunked upload expired during commit");
+      const output = await runtime.publishResourceBytes({
         work_id: upload.work_id, actor: upload.actor, title: upload.title, filename: upload.filename,
-        content_type: upload.content_type, encoding: "base64", content: bytes.toString("base64"), kind: upload.kind,
+        content_type: upload.content_type, bytes, kind: upload.kind,
         source_refs: upload.source_refs, confidentiality: upload.confidentiality,
       });
-      chunkUploads.delete(upload_id);
-      await rm(upload.path, { force: true });
       return textResult(`Committed ${output.artifact_id}; searchable=${output.searchable}.`, output);
     } catch (error) {
       return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true };
+    } finally {
+      if (upload) {
+        if (committing) await discardChunkUpload(upload).catch(() => undefined);
+        upload.busy = false;
+      }
     }
   });
 
@@ -491,10 +617,11 @@ export function registerProjectTools(server: McpServer, runtime: ProjectRuntime,
 
   if (profile === "project-resolve") server.registerTool("kb_submit_user_resolution", {
     title: "Submit Authorized User Conflict Resolution",
-    description: "Persist the exact answer of the project owner or a designated resolver for an existing open conflict. This tool only locks the answer and queues maintenance; it never resolves the conflict inline. Non-resolver Agents must not persist a user's ad-hoc reply through any other tool.",
+    description: "Persist the exact answer and structured resolution_decision supplied or explicitly confirmed by the authenticated project owner or designated resolver. Never infer the decision's outcome, affected claims, or scopes from prose. This tool only locks the answer and queues maintenance; it never resolves the conflict inline. Non-resolver Agents must not persist a user's ad-hoc reply through any other tool.",
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     inputSchema: {
       conflict_id: z.string(), expected_conflict_revision: z.string().length(64), resolution_statement: z.string().min(1).max(4000),
+      resolution_decision: conflictResolutionDecisionSchema,
       source_turn_ref: z.string().min(1).max(500), user_statement_hash: z.string().regex(/^[a-f0-9]{64}$/), idempotency_key: z.string().min(8).max(200),
     },
   }, async input => {

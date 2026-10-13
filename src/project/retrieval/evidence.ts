@@ -180,9 +180,54 @@ export async function buildEvidenceCorpus(root: string, items: Array<{ record: K
     catch { roots = []; rootsUnavailable = true; }
     return roots;
   };
+  const ownership: Array<{ path: string; directory: boolean; record: KnowledgeRecord }> = [];
+  const registeredPath = (value: string): string | undefined => {
+    if (value.includes("\0") || value.split(/[\\/]/).includes("..") || /^[a-z][a-z\d+.-]*:/i.test(value)) return undefined;
+    const path = resolve(root, value), lexicalRoot = resolve(root);
+    return within(lexicalRoot, path) ? resolve(realRoot, relative(lexicalRoot, path)) : within(realRoot, path) ? path : undefined;
+  };
+  for (const { record } of items.filter(item => item.record.type === "artifact")) {
+    for (const key of ["normalized_markdown_path", "image_source_markdown_path"]) {
+      const path = typeof record[key] === "string" ? registeredPath(record[key] as string) : undefined;
+      if (path) ownership.push({ path: dirname(path), directory: true, record });
+    }
+    let original = typeof record.managed_relative_path === "string" ? registeredPath(record.managed_relative_path) : undefined;
+    if (!original && typeof record.original_relative_path === "string" && typeof record.source_root_id === "string") {
+      const sourceRoot = (await getRoots()).find(value => value.id === record.source_root_id && value.project_id === record.project_id && value.enabled !== false);
+      if (sourceRoot && !record.original_relative_path.split(/[\\/]/).includes("..")) original = registeredPath(sourceFilePath(root, sourceRoot, record.original_relative_path));
+    }
+    if (original) {
+      ownership.push({ path: original, directory: false, record });
+      if (/\.(md|markdown)$/i.test(String(record.original_relative_path ?? original)) || /^text\/markdown(?:;|$)/i.test(String(record.mime_type ?? ""))) ownership.push({ path: dirname(original), directory: true, record });
+    }
+  }
+  const confidentialityRank = (record: KnowledgeRecord): number => ({ public: 0, internal: 1, restricted: 2, secret: 3 }[record.confidentiality ?? "internal"]);
+  const imageOwner = (path: string, source: KnowledgeRecord, original: boolean): KnowledgeRecord => {
+    const exact = ownership.filter(owner => !owner.directory && owner.path === path);
+    if (exact.some(owner => owner.record.project_id !== source.project_id || confidentialityRank(owner.record) > confidentialityRank(source))) throw new Error("image file ownership is not authorized");
+    if (original && exact.some(owner => owner.record.id === source.id)) return source;
+    let candidates = exact;
+    if (!candidates.length) {
+      const directories = ownership.filter(owner => owner.directory && within(owner.path, path));
+      const deepest = Math.max(-1, ...directories.map(owner => owner.path.length));
+      candidates = directories.filter(owner => owner.path.length === deepest);
+      // Ambiguous shared directories cannot downgrade another artifact's label.
+      if (candidates.some(owner => owner.record.project_id !== source.project_id || confidentialityRank(owner.record) > confidentialityRank(source))) throw new Error("image directory ownership is not authorized");
+    }
+    const eligible = candidates.filter(owner => owner.record.project_id === source.project_id && confidentialityRank(owner.record) <= confidentialityRank(source));
+    const owner = eligible.find(item => item.record.id === source.id) ?? eligible[0];
+    if (!owner) throw new Error("image has no authorized same-project artifact owner");
+    return owner.record;
+  };
   for (const item of items) {
     const record = item.record;
-    const fingerprint = hash(stableValue({ record, body: item.body }));
+    const ownedPaths = ownership.filter(owner => owner.record.id === record.id);
+    // Reuse must also bind the labels/ownership of neighboring resources. A
+    // changed image owner must invalidate an unchanged referencing document.
+    const relevantOwners = ownership.filter(owner => !ownedPaths.length || ownedPaths.some(own =>
+      own.directory ? within(own.path, owner.path) || owner.directory && within(owner.path, own.path)
+        : own.path === owner.path || owner.directory && within(owner.path, own.path)));
+    const fingerprint = hash(stableValue({ record, body: item.body, image_owners: relevantOwners.map(owner => ({ path: owner.path, directory: owner.directory, id: owner.record.id, project: owner.record.project_id, confidentiality: owner.record.confidentiality ?? "internal" })) }));
     const cached = reusable?.get(record.id);
     if (cached?.fingerprint === fingerprint) {
       const units = cached.units.map(unit => copyUnit(unit, revision));
@@ -218,7 +263,7 @@ export async function buildEvidenceCorpus(root: string, items: Array<{ record: K
       start = Math.max(start + 1, end - CHUNK_OVERLAP);
       if (/[\uDC00-\uDFFF]/.test(clean[start]!)) start--;
     }
-    const imageCandidates: Array<{ path?: string; originalMarkdownTarget?: string; label: string; alt: string; caption: string; index: number; start: number; sourceHash: string; location: EvidenceLocator; context: string; original?: boolean }> = [];
+    const imageCandidates: Array<{ path?: string; boundary?: string; originalMarkdownTarget?: string; label: string; alt: string; caption: string; index: number; start: number; sourceHash: string; location: EvidenceLocator; context: string; original?: boolean }> = [];
     const isOriginalMarkdown = record.type === "artifact" && typeof record.original_relative_path === "string"
       && (/\.(md|markdown)$/i.test(record.original_relative_path) || /^text\/markdown(?:;|$)/i.test(String(record.mime_type ?? "")));
     let originalMarkdownPath: Promise<string | undefined> | undefined;
@@ -244,12 +289,12 @@ export async function buildEvidenceCorpus(root: string, items: Array<{ record: K
         try {
           const target = decodeURIComponent(image.target.replace(/\\([ ()])/g, "$1"));
           if (!target || target.includes("\0") || target.includes("\\") || isAbsolute(target) || /^[a-z][a-z\d+.-]*:/i.test(target) || target.startsWith("//")) throw new Error("nonlocal image");
-          // Resolve relative parent segments lexically, then let safeLocalPath
-          // enforce the knowledge-root boundary and reject symlink ancestors.
+          // Parent segments may return to this artifact's directory, but must
+          // never enlarge its resource boundary to the whole knowledge root.
           imagePath = resolve(path ? dirname(path) : root, target);
           if (allowOriginalFallback && isOriginalMarkdown) originalMarkdownTarget = target;
         } catch { /* Keep an explicit unavailable entry; never fetch remote references. */ }
-        imageCandidates.push({ path: imagePath, originalMarkdownTarget, label: image.target.startsWith("data:") ? "inline-data-image" : image.target, alt: image.alt, caption: image.caption, index: indexOffset + image.index, start: image.offset, sourceHash: imageSourceHash, location: sourceLocate(image.offset, image.end), context: sourceClean.slice(Math.max(0, image.offset - 350), Math.min(sourceClean.length, image.end + 350)) });
+        imageCandidates.push({ path: imagePath, boundary: path ? dirname(path) : undefined, originalMarkdownTarget, label: image.target.startsWith("data:") ? "inline-data-image" : image.target, alt: image.alt, caption: image.caption, index: indexOffset + image.index, start: image.offset, sourceHash: imageSourceHash, location: sourceLocate(image.offset, image.end), context: sourceClean.slice(Math.max(0, image.offset - 350), Math.min(sourceClean.length, image.end + 350)) });
       }
     };
     if (!metadataOnly) addMarkdownImages(text, documentPath, true);
@@ -281,7 +326,17 @@ export async function buildEvidenceCorpus(root: string, items: Array<{ record: K
       const imageUri = `kb://artifact/${encodeURIComponent(record.id)}/image/${image.index}`;
       try {
         if (!image.path) throw new Error("image has no safe local path");
-        const bytes = await safeReadImagePath(root, image.path).catch(async error => {
+        const readOwnedImage = async (path: string, boundary?: string) => {
+          if (boundary && !within(boundary, resolve(path))) throw new Error("image is outside its artifact resource directory");
+          const checked = await safeLocalPath(root, path);
+          if (boundary && !within(boundary, checked)) throw new Error("resolved image is outside its artifact resource directory");
+          if (!boundary && !image.original && !ownership.some(owner => !owner.directory && owner.path === checked)) throw new Error("non-artifact image requires a registered image owner");
+          const owner = imageOwner(checked, record, image.original === true);
+          const bytes = await safeReadImagePath(root, checked);
+          if (bytes.path !== checked || boundary && !within(boundary, bytes.path)) throw new Error("image ownership path changed during read");
+          return { bytes, owner };
+        };
+        const { bytes, owner } = await readOwnedImage(image.path, image.boundary).catch(async error => {
           // Legacy ingestion copied Markdown without its sibling image folder.
           // Do not use a second location to bypass invalid bytes or unsafe paths.
           if (!image.originalMarkdownTarget || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -289,11 +344,11 @@ export async function buildEvidenceCorpus(root: string, items: Array<{ record: K
           if (!original) throw error;
           const fallback = resolve(dirname(original), image.originalMarkdownTarget);
           if (fallback === image.path) throw error;
-          return safeReadImagePath(root, fallback);
+          return readOwnedImage(fallback, dirname(original));
         });
         if (image.original && typeof record.sha256 === "string" && /^[a-f0-9]{64}$/i.test(record.sha256) && bytes.sha256 !== record.sha256.toLowerCase()) throw new Error("original image failed its registered content hash");
         const location = { ...image.location, image_index: image.index };
-        corpus.units.push({ ...base, id: `evidence-unit:${hash(`${record.id}:${image.sourceHash}:image:${image.start}:${image.index}:${bytes.sha256}`)}`, kind: "image", text: [record.title, ...(location.section_path ?? []), image.alt, image.caption, basename(image.label), image.context].filter(Boolean).join("\n"), content_hash: image.sourceHash, uri: imageUri, image_uri: imageUri, locator: location, image_path: bytes.path, image_mime: bytes.mimeType, image_sha256: bytes.sha256 });
+        corpus.units.push({ ...base, source_refs: [...new Set([...base.source_refs, owner.id])], id: `evidence-unit:${hash(`${record.id}:${image.sourceHash}:image:${image.start}:${image.index}:${bytes.sha256}`)}`, kind: "image", text: [record.title, ...(location.section_path ?? []), image.alt, image.caption, basename(image.label), image.context].filter(Boolean).join("\n"), content_hash: image.sourceHash, uri: imageUri, image_uri: imageUri, locator: location, image_path: bytes.path, image_mime: bytes.mimeType, image_sha256: bytes.sha256, image_artifact_id: owner.id });
         corpus.coverage.image_units++;
         if (image.original) originalImageAvailable = true;
       } catch (error) {

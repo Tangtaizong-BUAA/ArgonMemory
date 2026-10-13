@@ -8,7 +8,8 @@
     "One kernel behind the existing library and HTTP entry points",
     "Replace hosted Skill adapter with the generic Argon Memory release",
     "Package personal and collaborative deployment assets; exclude the control panel, private data and credentials",
-    "Resolve the actual Python interpreter in synthetic preview fixtures for Linux PATH-based launches"
+    "Resolve the actual Python interpreter in synthetic preview fixtures for Linux PATH-based launches",
+    "Apply October 2026 security boundaries for maintenance authorization, atomic publication, image ownership and bounded resources"
   ],
   "files": [
     {
@@ -21,7 +22,7 @@
       "source": "src/backends/python/cyj_maintenance_worker.py",
       "target": "src/backends/python/cyj_maintenance_worker.py",
       "source_sha256": "55e65564613ffda946bd4752664fa1088add982325d24a345ec0a4c6c907353d",
-      "target_sha256": "0d2d086bf7a2df1801e8c5e804ad5a3a00770e20e2b7f6a37cf72393b8494da0"
+      "target_sha256": "da5d3279f5cf8078c244c4333738b1baf44dbcec19940cad5b794d16d7afdc0e"
     },
     {
       "source": "src/backends/python/cyj_stop_after_plan.py",
@@ -93,7 +94,7 @@
       "source": "src/mcp/project-http-server.ts",
       "target": "src/mcp/project-http-server.ts",
       "source_sha256": "bc69ef98a1a66e5054af97b3dcd2c35b6ded681aaa4ffed0855c77daa95ee0b0",
-      "target_sha256": "0261e7765baad3b310b8f7296791e5b8c2c4dc149209083be9c8cd9661292dd5"
+      "target_sha256": "c18e0db55895f858f5758388c726e62f48c2a051705b17ccbd1ba383907a5d49"
     },
     {
       "source": "src/mcp/project-resource.ts",
@@ -111,13 +112,13 @@
       "source": "src/mcp/tools/project.ts",
       "target": "src/mcp/tools/project.ts",
       "source_sha256": "43609a03337af4300ec764bc62b71a3632309004a1425a3e5c45b48b4e4456e7",
-      "target_sha256": "b3037e62c2f8cefd58a6f5ca12aaea841e38645eeaeac07caf8e7cccad804bd7"
+      "target_sha256": "dc4b17bba046ba5a07e7a00cd7976212e1b80914d963de4f0ab1c8a4b42204e8"
     },
     {
       "source": "src/project/client-notices.ts",
       "target": "src/project/client-notices.ts",
       "source_sha256": "81e95f9091878de6e52dc7a3acb5cd27312c7ce8db1206c301376d242b11337b",
-      "target_sha256": "12b7db6531554e2ab6dc93694f1cbf863a30ebe67485944dc365330f4c77be16"
+      "target_sha256": "e9e39def41e612e4283f799cf000305fffb7fc9001456df81ee7a0e344e96082"
     },
     {
       "source": "src/project/client-skill-bundle.generated.ts",
@@ -159,7 +160,7 @@
       "source": "src/project/maintenance/contracts.ts",
       "target": "src/project/maintenance/contracts.ts",
       "source_sha256": "b3066033e954465e3e8c27d66c42a1ced0d49ae4613e072247ba73f1e6fa6506",
-      "target_sha256": "35bd3e33263ec7c7f55ff233bde372fea9fdaa78bf1ce432f5c6eeeb08927a3e"
+      "target_sha256": "e9e928e79b6dba89a168ff22e33a351cbecd11e0fa84313777d7bd3a131c1cfa"
     },
     {
       "source": "src/project/maintenance/jev-maintenance.ts",
@@ -189,7 +190,7 @@
       "source": "src/project/maintenance/queue.ts",
       "target": "src/project/maintenance/queue.ts",
       "source_sha256": "1b92b3edb06ae9818a5a0a7d2d49ea1d8fee85ec9823f7aca77fbb3cf87ead9a",
-      "target_sha256": "1b92b3edb06ae9818a5a0a7d2d49ea1d8fee85ec9823f7aca77fbb3cf87ead9a"
+      "target_sha256": "de158ee0a5492663896a16e0f5a7320bd0495ac42dcc7b9fbec66ea9cdd59854"
     },
     {
       "source": "src/project/multimodal/alibaba-client.ts",
@@ -213,7 +214,7 @@
       "source": "src/project/retrieval/evidence.ts",
       "target": "src/project/retrieval/evidence.ts",
       "source_sha256": "71f72ef70ce3d7c32035f2a1eab221ea842ab9c188ed0ac8babfb6ffb7cfb8b8",
-      "target_sha256": "71f72ef70ce3d7c32035f2a1eab221ea842ab9c188ed0ac8babfb6ffb7cfb8b8"
+      "target_sha256": "f1487ac55c6859d3377611619f693dd7a16229b66886aad9da1a81d8c7548dbf"
     },
     {
       "source": "src/project/retrieval/index.ts",
@@ -255,13 +256,13 @@
       "source": "src/project/retrieval/types.ts",
       "target": "src/project/retrieval/types.ts",
       "source_sha256": "1795ae536a5499e5a0bd4842ec4c8b28f3a043facff90785d25e44403c7b8b65",
-      "target_sha256": "1795ae536a5499e5a0bd4842ec4c8b28f3a043facff90785d25e44403c7b8b65"
+      "target_sha256": "5a63f4d0766fab2d37694b355a073f757c7356dbe5ebbc00c9ced1d8ddb514b3"
     },
     {
       "source": "src/project/revision-store.ts",
       "target": "src/project/revision-store.ts",
       "source_sha256": "e6da8846eb604af2ae91eae7ceaebc9a43632bc268e05b7499e1c5d2a16f9fe5",
-      "target_sha256": "d4bdcb079ba16ce80adb4671221edb14b397a0ca3765192e562ddd80d5b307e7"
+      "target_sha256": "21df03cd304dc9bf8353063da0ba672253469f3cc4056ffc282d04da2c163703"
     },
     {
       "source": "src/project/runner-import.ts",
@@ -273,7 +274,7 @@
       "source": "src/project/runtime.ts",
       "target": "src/project/runtime.ts",
       "source_sha256": "f0f1c3ed464829691021aad556176a7a43adc0847899b017a767828e7300f3f1",
-      "target_sha256": "cdea6e187d6399e55501047f950a7118584fc4a999f4ffdcb711c8ec5f99fd42"
+      "target_sha256": "e12bbb3e59a76173ead1b9cf581d0ac3006b639625330ea3244cf71884385e3f"
     },
     {
       "source": "src/project/validation.ts",
@@ -411,13 +412,13 @@
       "source": "test/project-retrieval-evidence.test.ts",
       "target": "test/project-retrieval-evidence.test.ts",
       "source_sha256": "d860067445be9c161066d097d3d0c70a187aa84a668a383a8d6dc03e50105eed",
-      "target_sha256": "08b84e23880751f0d352696052cf4465daef5d22395abcfb468a2713e7cbdbb3"
+      "target_sha256": "bce248846307801d82c5ef8893db4f7e690946a7c5734d7748ceb7ca6b23c7cf"
     },
     {
       "source": "test/project-retrieval-mcp.test.ts",
       "target": "test/project-retrieval-mcp.test.ts",
       "source_sha256": "3d0ee80327a3127cfd2f33a8b72f20f23de071cd7ffcecf8454578f3ef9855f1",
-      "target_sha256": "3025ab56a2b37c16bb1893033d7405fbdcc95ff087badea2ab3c215fd4e4cf4e"
+      "target_sha256": "3a0ff0a55d99a2e488f77ea8d54a03f0894582c6708bd8a759628caeb565ef46"
     },
     {
       "source": "test/project-retrieval-normalize-runtime.test.ts",

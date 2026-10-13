@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { inflateSync } from "node:zlib";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -55,7 +55,8 @@ async function fixture() {
   await server.connect(a); await client.connect(b);
   const call = async (name: string, args: Record<string, unknown> = {}): Promise<any> => client.callTool({ name, arguments: args });
   const artifact = async (id: string, text: string, confidentiality: "internal" | "restricted" | "secret" = "internal", extra: Record<string, unknown> = {}) => {
-    const path = `normalized/${id.replaceAll(":", "-")}.md`;
+    const path = `normalized/${id.replaceAll(":", "-")}/document.md`;
+    await mkdir(dirname(join(root, path)), { recursive: true });
     await writeFile(join(root, path), text);
     await runtime.upsertRecord({ id, type: "artifact", title: id, status: "parsed", project_id: PROJECT, created_by: "fixture", confidentiality,
       normalized_markdown_path: path, mime_type: "text/markdown", sha256: createHash("sha256").update(text).digest("hex"), ...extra });
@@ -160,10 +161,11 @@ describe("Project retrieval through MCP transport and registered tools", () => {
 
   test("coverage keeps current counts, images and gaps in one scope without mixing historical or unverified inventory", async () => {
     const f = await fixture();
-    await writeFile(join(f.root, "agent-resources/current.png"), PNG);
-    await f.artifact("artifact:current", "# Current\n![active](../agent-resources/current.png)\n");
+    const current = await f.artifact("artifact:current", "# Current\n![active](current.png)\n");
+    await writeFile(join(f.root, dirname(current), "current.png"), PNG);
     await f.artifact("artifact:active-missing", "unused", "internal", { normalized_markdown_path: "normalized/absent-current.md" });
-    await f.artifact("artifact:historic", `# Historical\n${"historical body\n".repeat(300)}![](../agent-resources/current.png)\n![](missing-historic.png)`, "internal", { status: "stale" });
+    const historic = await f.artifact("artifact:historic", `# Historical\n${"historical body\n".repeat(300)}![](current.png)\n![](missing-historic.png)`, "internal", { status: "stale" });
+    await writeFile(join(f.root, dirname(historic), "current.png"), PNG);
     await f.artifact("artifact:historic-missing", "unused", "internal", { status: "archived", normalized_markdown_path: "normalized/absent-historic.md" });
     await f.artifact("artifact:unverified", "# Unverified\n![](missing-unverified.png)", "internal", { status: "candidate" });
     await f.artifact("artifact:hidden", "# Hidden\n![](missing-hidden.png)", "secret");
@@ -188,8 +190,9 @@ describe("Project retrieval through MCP transport and registered tools", () => {
     await writeFile(join(f.root, "agent-resources", "d0e9a4.png"), PNG);
     await f.runtime.upsertRecord({ id: "artifact:opaque-image", title: "d0e9a4.png", type: "artifact", status: "parsed", project_id: PROJECT, created_by: "fixture",
       mime_type: "image/png", managed_relative_path: "agent-resources/d0e9a4.png", original_relative_path: "d0e9a4.png", sha256: createHash("sha256").update(PNG).digest("hex") });
+    await writeFile(join(f.root, "agent-resources", "hidden-image.png"), PNG);
     await f.runtime.upsertRecord({ id: "artifact:hidden-image", title: "HIDDEN_PIXELS", type: "artifact", status: "parsed", project_id: PROJECT, created_by: "fixture", confidentiality: "secret",
-      mime_type: "image/png", managed_relative_path: "agent-resources/d0e9a4.png", original_relative_path: "d0e9a4.png", sha256: createHash("sha256").update(PNG).digest("hex") });
+      mime_type: "image/png", managed_relative_path: "agent-resources/hidden-image.png", original_relative_path: "hidden-image.png", sha256: createHash("sha256").update(PNG).digest("hex") });
     await f.runtime.rebuildRetrieval(true);
     expect(f.imageCalls).toHaveLength(1);
     const found = await f.call("kb_search", { query: "多人并肩站立", mode: "semantic", modality: "image", project_id: PROJECT, include_images: true, rerank: false });

@@ -9,7 +9,7 @@ export type EvidenceUnit = {
   title: string; record_type: string; status: string; confidentiality: Confidentiality;
   kind: "text" | "image"; text: string; content_hash: string; source_revision: string;
   uri: string; locator: EvidenceLocator; source_refs: string[];
-  image_path?: string; image_mime?: string; image_sha256?: string; image_uri?: string;
+  image_path?: string; image_mime?: string; image_sha256?: string; image_uri?: string; image_artifact_id?: string;
 };
 export type CorpusCoverage = {
   total_records: number; total_artifacts: number; text_artifacts: number; image_units: number;

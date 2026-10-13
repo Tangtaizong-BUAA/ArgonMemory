@@ -15,7 +15,8 @@ import { buildProjectView, PROJECT_VIEW_KINDS, type ProjectViewKind } from "./vi
 import { inventorySourceRoot, parseSourceRoots, sourceFilePath, type InventoryEntry, type SourceRoot } from "./ingestion.js";
 import { CanonicalRevisionStore, type CanonicalDirectory } from "./revision-store.js";
 import { MaintenanceQueue } from "./maintenance/queue.js";
-import type { ChangePacket, MaintenancePlan } from "./maintenance/contracts.js";
+import { changePacketSchema, conflictResolutionDecisionSchema, MAX_MAINTENANCE_MEDIA_BYTES, MAX_MAINTENANCE_PACKET_MEDIA_BYTES, validateMaintenancePlan, type ChangePacket, type ConflictResolutionDecision, type MaintenancePlan, type MutableDocumentBlock } from "./maintenance/contracts.js";
+import { mutableHeadingBlocks, patchMutableHeading, renderMutableBlock } from "./maintenance/blocks.js";
 import { buildEvidenceCorpus, loadEvidenceImage, safeReadImagePath } from "./retrieval/evidence.js";
 import { ProjectRetrievalIndex, type RetrievalIndexProgress } from "./retrieval/index.js";
 import { createQwenRetrievalProvider } from "./retrieval/qwen-provider.js";
@@ -253,6 +254,25 @@ function confidentialityAllowed(record: { confidentiality?: unknown }, maximum: 
   return rank[(record.confidentiality ?? "internal") as Confidentiality] <= rank[maximum];
 }
 
+function eligibleEvidenceRecord(record: KnowledgeRecord, projectId: string, maximum: Confidentiality = "internal"): boolean {
+  if (record.project_id !== projectId || !confidentialityAllowed(record, maximum) || ["quarantined", "rejected", "disputed", "stale", "superseded", "candidate", "unverified"].includes(String(record.validation_status ?? record.status))) return false;
+  return record.type === "artifact" ? ["parsed", "accepted", "indexed"].includes(record.status)
+    : record.type === "memory" ? record.status === "accepted" && record.validation_status === "verified"
+    : record.type === "evidence" ? record.status === "verified"
+    : ["user_directive", "architecture_decision"].includes(record.type) && record.status === "accepted" && record.attestation_mode === "verified_principal" && typeof record.submitted_by_principal === "string";
+}
+
+function conflictClaimRefs(record: KnowledgeRecord): string[] {
+  const variants = Array.isArray(record.claim_variants) ? record.claim_variants : [];
+  return uniqueStrings([...asStrings(record.claim_variant_refs), ...variants.map(variant => typeof variant === "string" ? variant : variant && typeof variant === "object" ? String((variant as Record<string, unknown>).id ?? (variant as Record<string, unknown>).ref ?? "") : "")]);
+}
+
+function resolutionAuthorization(record: Pick<KnowledgeRecord, "id"> & Record<string, unknown>): string {
+  return digest(JSON.stringify({ conflict_id: record.conflict_id, expected_conflict_revision: record.expected_conflict_revision,
+    resolution_statement: record.resolution_statement, user_statement_hash: record.user_statement_hash, source_turn_ref: record.source_turn_ref,
+    actor_principal: record.submitted_by_principal, resolution_decision: conflictResolutionDecisionSchema.parse(record.resolution_decision) }));
+}
+
 function renderRecord(record: KnowledgeRecord, body = ""): string {
   const frontmatter = YAML.stringify(record).trimEnd();
   return `---\n${frontmatter}\n---\n\n${body || `# ${record.title}\n`}`;
@@ -338,9 +358,41 @@ export class ProjectRuntime {
     await this.maintenanceQueue.initialize();
   }
 
+  private maintenanceBlocks(items: Array<{ record: KnowledgeRecord; body: string }>, projectId: string, sectionRefs: string[], routingText: string, guided = new Set<string>()): { documentParts: string[]; mutableBlocks: MutableDocumentBlock[] } {
+    const candidates: Array<{ score: number; text: string; capability: MutableDocumentBlock }> = [];
+    for (const item of items) {
+      if (item.record.project_id !== projectId || !confidentialityAllowed(item.record, "internal") || !(item.record.id === projectId && item.record.type === "project" || item.record.type === "knowledge_section" && item.record.status === "active" && sectionRefs.includes(item.record.id))) continue;
+      const expectedRevision = String((item.record.type === "project" ? item.record.main_revision : item.record.revision_hash) ?? digest(item.body));
+      for (const block of mutableHeadingBlocks(item.body, item.record.id, expectedRevision)) {
+        const title = block.title.toLowerCase();
+        let score = routingText.includes(title) ? 20 : 0;
+        for (let index = 0; index + 1 < title.length; index++) if (routingText.includes(title.slice(index, index + 2))) score += 2;
+        if (guided.has(item.record.id)) score += 1;
+        if (score) candidates.push({ score, text: renderMutableBlock(block), capability: block.capability });
+      }
+    }
+    const documentParts: string[] = [], mutableBlocks: MutableDocumentBlock[] = [];
+    let characters = 0;
+    for (const candidate of candidates.sort((a, b) => b.score - a.score).slice(0, 4)) {
+      if (characters + candidate.text.length > 3000) continue;
+      documentParts.push(candidate.text); mutableBlocks.push(candidate.capability); characters += candidate.text.length;
+    }
+    return { documentParts, mutableBlocks };
+  }
+
+  private maintenanceCapabilities(items: Array<{ record: KnowledgeRecord; body: string }>, projectId: string, sectionRefs: string[], evidenceRefs: string[]): Pick<ChangePacket, "topology_targets" | "routed_conflicts"> {
+    const visible = items.filter(item => item.record.project_id === projectId && confidentialityAllowed(item.record, "internal"));
+    const targets = visible.filter(item => item.record.id === projectId && item.record.type === "project" || item.record.type === "knowledge_section" && item.record.status === "active" && sectionRefs.includes(item.record.id));
+    const eligibleRefs = uniqueStrings([...targets.map(item => item.record.id), ...visible.filter(item => evidenceRefs.includes(item.record.id) && eligibleEvidenceRecord(item.record, projectId)).map(item => item.record.id)]).slice(0, 100);
+    return {
+      topology_targets: targets.slice(0, 7).map(item => ({ target_ref: item.record.id, expected_revision: digest(renderRecord(item.record, item.body)), allowed_add_refs: eligibleRefs.filter(id => id !== item.record.id) })),
+      routed_conflicts: visible.filter(item => item.record.type === "conflict" && item.record.status === "open").slice(0, 30).map(item => ({ conflict_id: item.record.id, expected_conflict_revision: digest(renderRecord(item.record, item.body)), claim_variant_refs: conflictClaimRefs(item.record).slice(0, 50) })),
+    };
+  }
+
   private async enqueueMaintenance(input: {
     project_id: string; trigger: ChangePacket["trigger"]; idempotency_key: string; text_context: string;
-    evidence_refs?: string[]; candidate_section_refs?: string[]; media?: ChangePacket["media"]; locked_user_resolution_ref?: string;
+    evidence_refs?: string[]; candidate_section_refs?: string[]; media?: ChangePacket["media"]; locked_user_resolution_ref?: string; actor_principal?: string;
   }): Promise<string> {
     const pointer = await this.revisionStore.pointer();
     const items = (await this.records()).filter(({ record }) => record.project_id === input.project_id && confidentialityAllowed(record, "internal"));
@@ -379,50 +431,26 @@ export class ProjectRuntime {
       .slice(0, 2)
       .map(candidate => candidate.id);
     const candidateSectionRefs = uniqueStrings([...(input.candidate_section_refs ?? []), ...inferredSections]).filter(id => visibleIds.has(id)).slice(0, 6);
-    const documentParts: string[] = [];
-    const documentCandidates = items.filter(item => item.record.id === input.project_id || candidateSectionRefs.includes(item.record.id));
-    const headingCandidates: Array<{ score: number; text: string }> = [];
-    for (const item of documentCandidates) {
-      const lines = item.body.split("\n");
-      const headings = lines.map((line, index) => {
-        const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
-        return match ? { index, level: match[1]!.length, title: match[2]! } : null;
-      }).filter((value): value is { index: number; level: number; title: string } => value !== null);
-      for (let index = 0; index < headings.length; index += 1) {
-        const heading = headings[index]!;
-        const next = headings.slice(index + 1).find(candidate => candidate.level <= heading.level);
-        const content = lines.slice(heading.index + 1, next?.index ?? lines.length).join("\n").trim();
-        if (!content || content.length > 2_500) continue;
-        const title = heading.title.toLowerCase();
-        let score = routingText.includes(title) ? 20 : 0;
-        for (let offset = 0; offset + 1 < title.length; offset += 1) if (routingText.includes(title.slice(offset, offset + 2))) score += 2;
-        if (score === 0) continue;
-        const expectedRevision = item.record.id === input.project_id ? String(item.record.main_revision ?? digest(item.body)) : String(item.record.revision_hash ?? digest(item.body));
-        headingCandidates.push({ score, text: `## Mutable document block\ntarget_ref: ${item.record.id}\nexpected_revision: ${expectedRevision}\nblock_key: heading:${heading.title}\nprevious_block_hash: ${digest(content)}\n\n${content}` });
-      }
-    }
-    let documentChars = 0;
-    for (const candidate of headingCandidates.sort((a, b) => b.score - a.score).slice(0, 4)) {
-      if (documentChars + candidate.text.length > 3_000) continue;
-      documentParts.push(candidate.text);
-      documentChars += candidate.text.length;
-    }
+    const { documentParts, mutableBlocks } = this.maintenanceBlocks(items, input.project_id, candidateSectionRefs, routingText);
+    const capabilities = this.maintenanceCapabilities(items, input.project_id, candidateSectionRefs, evidenceRefs);
+    const lockedResolution = input.locked_user_resolution_ref ? items.find(item => item.record.id === input.locked_user_resolution_ref)?.record : undefined;
+    if (input.locked_user_resolution_ref && (!lockedResolution || typeof lockedResolution.authorization_hash !== "string")) throw new Error("Locked user resolution lacks structured authorization");
     const hydratedContext = [input.text_context.slice(0, 1_500), ...evidenceParts, ...documentParts].join("\n\n").slice(0, 6_000);
     const packetId = `packet:argon:${digest(input.idempotency_key).slice(0, 24)}`;
     const packet: ChangePacket = {
-      schema: "argon-memory-change-packet/v1", packet_id: packetId, project_id: input.project_id, idempotency_key: input.idempotency_key,
+      schema: "argon-memory-change-packet/v1", packet_id: packetId, project_id: input.project_id, actor_principal: input.actor_principal ?? "maintenance-system", idempotency_key: input.idempotency_key,
       trigger: input.trigger,
       base_revisions: { knowledge_revision: pointer?.knowledge_revision ?? "legacy", topology_revision: pointer?.topology_revision ?? "legacy", index_revision: pointer?.index_revision ?? "unbuilt" },
       evidence_refs: evidenceRefs, candidate_section_refs: candidateSectionRefs,
-      open_conflict_refs: openConflicts, text_context: hydratedContext, media: (input.media ?? []).filter(media => {
+      open_conflict_refs: openConflicts, mutable_blocks: mutableBlocks, ...capabilities, text_context: hydratedContext, media: (input.media ?? []).filter(media => {
         const artifact = records.find(record => record.id === media.artifact_id);
         return artifact && artifact.project_id === input.project_id && confidentialityAllowed(artifact, "internal");
       }).slice(0, 12),
-      budget: { max_tool_calls: 2, max_cumulative_input_tokens: 12000, max_context_tokens_per_step: 6000, max_cumulative_output_tokens: 3000, max_sections: 6, max_evidence_units: 40, max_multimodal_assets: 12, max_cost_usd: Number(process.env.ARGON_MEMORY_MAINTENANCE_MAX_COST_USD ?? "0.50") },
+      budget: { max_tool_calls: 2, max_cumulative_input_tokens: 12000, max_context_tokens_per_step: 6000, max_cumulative_output_tokens: 3000, max_sections: 6, max_evidence_units: 40, max_multimodal_assets: 12, max_multimodal_bytes: MAX_MAINTENANCE_PACKET_MEDIA_BYTES, max_cost_usd: Number(process.env.ARGON_MEMORY_MAINTENANCE_MAX_COST_USD ?? "0.50") },
       egress_policy: { maximum_confidentiality: "internal", provider: "alibaba_model_studio", region: process.env.ARGON_MEMORY_DASHSCOPE_REGION ?? "cn-beijing" },
-      ...(input.locked_user_resolution_ref ? { locked_user_resolution_ref: input.locked_user_resolution_ref } : {}),
+      ...(lockedResolution ? { locked_user_resolution_ref: lockedResolution.id, locked_user_resolution_hash: String(lockedResolution.authorization_hash), locked_user_resolution_decision: conflictResolutionDecisionSchema.parse(lockedResolution.resolution_decision) } : {}),
     };
-    await this.maintenanceQueue.enqueue(packet);
+    await this.maintenanceQueue.enqueue(changePacketSchema.parse(packet));
     return packetId;
   }
 
@@ -535,6 +563,8 @@ export class ProjectRuntime {
     const id = uriOrId.startsWith("kb://evidence/") ? decodeURIComponent(uriOrId.slice("kb://evidence/".length)) : uriOrId;
     const unit = corpus.units.find(candidate => candidate.kind === "image" && (candidate.id === id || candidate.uri === uriOrId || candidate.image_uri === uriOrId));
     if (!unit || !confidentialityAllowed(unit, maximum)) throw new Error("Image evidence not found or not visible");
+    const owner = unit.image_artifact_id ? await this.get(unit.image_artifact_id) : null;
+    if (!owner || owner.record.type !== "artifact" || owner.record.project_id !== unit.project_id || !confidentialityAllowed(owner.record, maximum)) throw new Error("Image owner is not visible in the current project");
     const image = await loadEvidenceImage(this.root, unit);
     return { uri: unit.image_uri ?? unit.uri, title: unit.title, ...image };
   }
@@ -700,10 +730,11 @@ export class ProjectRuntime {
     }, `# ${input.title}\n\nAgent-generated resource captured from work item ${work.id}. It is persistent project material, not independently verified evidence.\n`);
     await this.appendAudit({ type: "agent_resource_published", artifact_id: artifactId, work_id: work.id, project_id: work.project_id, actor: input.actor, sha256, size_bytes: bytes.length, mime_type: input.content_type });
     const modality = input.content_type.startsWith("image/") ? "image" as const : input.content_type.startsWith("video/") ? "video" as const : undefined;
+    const mediaAdmitted = modality && bytes.length <= MAX_MAINTENANCE_MEDIA_BYTES;
     await this.enqueueMaintenance({
-      project_id: work.project_id, trigger: "resource_published", idempotency_key: `resource:${artifactId}:${sha256}`,
-      text_context: `Agent resource published: ${input.title} (${input.kind}, ${input.content_type})`, evidence_refs: [artifactId],
-      media: modality ? [{ evidence_id: `evidence:${artifactId}:raw`, artifact_id: artifactId, modality, mime_type: input.content_type, sha256, locator: {}, transport: "base64_data_uri", value: `data:${input.content_type};base64,${bytes.toString("base64")}`, native_video_required: modality === "video" }] : [],
+      project_id: work.project_id, actor_principal: input.actor, trigger: "resource_published", idempotency_key: `resource:${artifactId}:${sha256}`,
+      text_context: `Agent resource published: ${input.title} (${input.kind}, ${input.content_type})${modality && !mediaAdmitted ? ". Media omitted from provider work: exceeds the 8 MiB admission limit." : ""}`, evidence_refs: [artifactId],
+      media: mediaAdmitted ? [{ evidence_id: `evidence:${artifactId}:raw`, artifact_id: artifactId, modality, mime_type: input.content_type, sha256, size_bytes: bytes.length, locator: {}, transport: "base64_data_uri", value: `data:${input.content_type};base64,${bytes.toString("base64")}`, native_video_required: modality === "video" }] : [],
     });
     return {
       artifact_id: artifactId, work_id: work.id, status, sha256, size_bytes: bytes.length,
@@ -738,26 +769,49 @@ export class ProjectRuntime {
     };
   }
 
-  private async evaluateMemory(candidate: KnowledgeRecord, actor: string): Promise<{ decision: ValidationDecision; reasons: string[]; remediation?: string }> {
+  private async evaluateMemory(candidate: KnowledgeRecord): Promise<{ decision: ValidationDecision; reasons: string[]; remediation?: string; evidence_snapshot?: Array<{ ref: string; revision: string; source_ref: string }> }> {
     const statement = String(candidate.statement ?? "");
     const kind = String(candidate.kind ?? "");
-    const refs = Array.isArray(candidate.evidence_refs) ? candidate.evidence_refs.filter((ref): ref is string => typeof ref === "string") : [];
+    const refs = uniqueStrings(asStrings(candidate.evidence_refs));
     if (SECRET_PATTERN.test(statement)) return { decision: "rejected", reasons: ["secret_pattern_detected"] };
     if (statement.trim().length < 8) return { decision: "rejected", reasons: ["statement_too_short"] };
     if (kind !== "open_question" && refs.length === 0) return { decision: "quarantined", reasons: ["missing_evidence"], remediation: "add_evidence" };
-    if (kind === "lesson" && refs.length < 2) return { decision: "quarantined", reasons: ["lesson_requires_independent_evidence"], remediation: "add_independent_evidence" };
-    if (["decision", "constraint", "preference"].includes(kind) && !refs.some(ref => ref.startsWith("user:") || ref.startsWith("adr:"))) {
+    const items = await this.records(), byId = new Map(items.map(item => [item.record.id, item]));
+    let corpus: EvidenceCorpus | undefined;
+    const resolved: Array<{ ref: string; revision: string; source_ref: string; record: KnowledgeRecord }> = [];
+    for (const ref of refs) {
+      const id = ref.startsWith("kb://record/") ? decodeURIComponent(ref.slice("kb://record/".length)) : ref;
+      let item = byId.get(id), sourceRef = item?.record.id, revision = item ? digest(renderRecord(item.record, item.body)) : undefined;
+      if (!item && (ref.startsWith("evidence:") || ref.startsWith("kb://evidence/"))) {
+        corpus ??= await this.evidenceCorpus();
+        const unit = corpus.units.find(unit => unit.id === ref || unit.uri === ref);
+        if (unit && unit.project_id === candidate.project_id && confidentialityAllowed(unit, "internal")) {
+          item = byId.get(unit.artifact_id ?? unit.record_id); sourceRef = unit.artifact_id ?? unit.record_id;
+          if (item) revision = digest(JSON.stringify({ record_revision: digest(renderRecord(item.record, item.body)), source_revision: unit.source_revision, content_hash: unit.content_hash }));
+        }
+      }
+      if (!item || !sourceRef || !revision || !eligibleEvidenceRecord(item.record, candidate.project_id)) return { decision: "quarantined", reasons: ["evidence_not_eligible"], remediation: "add_eligible_evidence" };
+      // A verified evidence record must also retain an eligible source artifact.
+      if (item.record.type === "evidence") {
+        const source = byId.get(String(item.record.artifact_id));
+        if (!source || !eligibleEvidenceRecord(source.record, candidate.project_id)) return { decision: "quarantined", reasons: ["evidence_source_not_eligible"], remediation: "add_eligible_evidence" };
+        sourceRef = source.record.id;
+      }
+      resolved.push({ ref, revision, source_ref: sourceRef, record: item.record });
+    }
+    if (kind === "lesson" && new Set(resolved.map(item => item.source_ref)).size < 2) return { decision: "quarantined", reasons: ["lesson_requires_independent_evidence"], remediation: "add_independent_evidence" };
+    if (["decision", "constraint", "preference"].includes(kind) && !resolved.some(item => ["user_directive", "architecture_decision"].includes(item.record.type) && item.record.attestation_mode === "verified_principal")) {
       return { decision: "quarantined", reasons: ["missing_authoritative_directive"], remediation: "add_authoritative_source" };
     }
-    const existing = (await this.records()).map(item => item.record).filter(record =>
+    const existing = items.map(item => item.record).filter(record =>
       record.type === "memory" && record.status === "accepted" && record.id !== candidate.id &&
-      record.kind === candidate.kind && record.scope === candidate.scope && record.statement !== candidate.statement,
+      record.project_id === candidate.project_id && record.kind === candidate.kind && record.scope === candidate.scope && record.statement !== candidate.statement,
     );
+    const evidence_snapshot = resolved.map(({ ref, revision, source_ref }) => ({ ref, revision, source_ref }));
     if (existing.length > 0) {
-      for (const record of existing) await this.upsertRecord({ ...record, status: "disputed", created_by: actor });
-      return { decision: "quarantined", reasons: ["conflicts_with_accepted_memory"], remediation: "reconcile_conflict" };
+      return { decision: "quarantined", reasons: ["conflicts_with_accepted_memory"], remediation: "reconcile_conflict", evidence_snapshot };
     }
-    return { decision: "accepted", reasons: ["policy_gates_passed"] };
+    return { decision: "accepted", reasons: ["policy_gates_passed"], evidence_snapshot };
   }
 
   private async appendAudit(event: Record<string, unknown>): Promise<string> {
@@ -771,7 +825,9 @@ export class ProjectRuntime {
   }
 
   private async validateAndStore(candidate: KnowledgeRecord, actor: string): Promise<{ status: ValidationDecision; eventId: string; remediation?: string }> {
-    const verdict = await this.evaluateMemory(candidate, actor);
+    if (this.options.readOnly) throw new Error("Read-only runtime cannot write memory");
+    const base = await this.revisionStore.pointer();
+    const verdict = await this.evaluateMemory(candidate);
     const traceId = `trace:argon:${randomUUID().replace(/-/g, "")}`;
     const eventId = newId("validation_event");
     const event: ValidationEvent = {
@@ -793,9 +849,14 @@ export class ProjectRuntime {
       policy_version: POLICY_VERSION,
       input_hash: digest(JSON.stringify(candidate)),
       trace_id: traceId,
+      evidence_snapshot: verdict.evidence_snapshot ?? [],
+      knowledge_revision: base?.knowledge_revision ?? "legacy",
     };
-    await this.writeRecord(event, `# Validation event\n\n${verdict.reasons.join(", ")}`);
-    await this.upsertRecord({ ...candidate, status: verdict.decision, validation_event_ref: eventId, validation_status: verdict.decision === "accepted" ? "verified" : verdict.decision === "rejected" ? "rejected" : "quarantined", created_by: candidate.created_by });
+    const memory = { ...candidate, status: verdict.decision, validation_event_ref: eventId, validation_status: verdict.decision === "accepted" ? "verified" : verdict.decision === "rejected" ? "rejected" : "quarantined", updated_at: now() };
+    await this.revisionStore.publish([
+      { directory: "events", filename: `${safeName(event.id)}.md`, content: renderRecord(event, `# Validation event\n\n${verdict.reasons.join(", ")}`) },
+      { directory: "memory", filename: `${safeName(candidate.id)}.md`, content: renderRecord(memory) },
+    ], { expectedParent: base?.knowledge_revision ?? null });
     return { status: verdict.decision, eventId, remediation: verdict.remediation };
   }
 
@@ -851,7 +912,7 @@ export class ProjectRuntime {
       checkpoint_hash: checkpointHash, capture_result: result,
       source_refs: uniqueStrings([current.record.id, ...stored.promoted, ...stored.quarantined, ...stored.rejected]),
     }, `# Context checkpoint\n\n${input.summary}\n`);
-    await this.enqueueMaintenance({ project_id: current.record.project_id, trigger: "context_captured", idempotency_key: `context:${checkpointHash}`, text_context: input.summary, evidence_refs: uniqueStrings([...stored.promoted, ...stored.quarantined, ...stored.rejected]) });
+    await this.enqueueMaintenance({ project_id: current.record.project_id, actor_principal: input.actor, trigger: "context_captured", idempotency_key: `context:${checkpointHash}`, text_context: input.summary, evidence_refs: uniqueStrings([...stored.promoted, ...stored.quarantined, ...stored.rejected]) });
     return result;
   }
 
@@ -896,7 +957,7 @@ export class ProjectRuntime {
       unresolved: input.unresolved ?? [],
       evidence_refs: input.evidence_refs ?? [],
     }, current.body);
-    await this.enqueueMaintenance({ project_id: work.project_id, trigger: "work_finished", idempotency_key: `work:${work.id}:${input.result_hash}`, text_context: input.summary, evidence_refs: uniqueStrings([...(input.evidence_refs ?? []), ...artifactRefs, ...result.promoted_memory_ids, ...result.quarantined_memory_ids]) });
+    await this.enqueueMaintenance({ project_id: work.project_id, actor_principal: input.actor, trigger: "work_finished", idempotency_key: `work:${work.id}:${input.result_hash}`, text_context: input.summary, evidence_refs: uniqueStrings([...(input.evidence_refs ?? []), ...artifactRefs, ...result.promoted_memory_ids, ...result.quarantined_memory_ids]) });
     return result;
   }
 
@@ -1179,16 +1240,28 @@ export class ProjectRuntime {
 
   async submitUserConflictResolution(input: {
     conflict_id: string; expected_conflict_revision: string; resolution_statement: string; source_turn_ref: string;
-    user_statement_hash: string; idempotency_key: string; actor_principal: string;
+    user_statement_hash: string; idempotency_key: string; actor_principal: string; resolution_decision: ConflictResolutionDecision;
   }): Promise<Record<string, unknown>> {
+    if (this.options.readOnly) throw new Error("Read-only runtime cannot authorize conflict resolutions");
+    const base = await this.revisionStore.pointer();
+    const decision = conflictResolutionDecisionSchema.parse(input.resolution_decision);
+    const authorizationHash = resolutionAuthorization({ id: "", ...input, submitted_by_principal: input.actor_principal, resolution_decision: decision });
+    const existing = (await this.lookup("user_conflict_resolution", { idempotency_key: input.idempotency_key }, 2))[0];
+    if (existing) {
+      if (existing.authorization_hash !== authorizationHash) throw new Error("Resolution idempotency key belongs to a different authorization");
+      return { conflict_id: input.conflict_id, status: existing.status === "applied" ? "applied" : "resolution_pending", resolution_id: existing.id, actor_principal: input.actor_principal, attestation_mode: "verified_principal", idempotent_replay: true };
+    }
     const found = await this.get(input.conflict_id);
     if (!found || found.record.type !== "conflict") throw new Error(`Unknown conflict: ${input.conflict_id}`);
     if (found.record.status !== "open") throw new Error(`Conflict is ${found.record.status}, expected open`);
     const currentRevision = digest(renderRecord(found.record, found.body));
     if (currentRevision !== input.expected_conflict_revision) throw new Error(`Conflict revision conflict: expected ${input.expected_conflict_revision}, current ${currentRevision}`);
     if (digest(input.resolution_statement) !== input.user_statement_hash) throw new Error("user_statement_hash does not match resolution_statement");
-    const existing = (await this.lookup("user_conflict_resolution", { idempotency_key: input.idempotency_key }, 2))[0];
-    if (existing) return { conflict_id: input.conflict_id, status: "resolution_pending", resolution_id: existing.id, current_conflict_revision: currentRevision, actor_principal: input.actor_principal, attestation_mode: "verified_principal", idempotent_replay: true };
+    const claimRefs = conflictClaimRefs(found.record);
+    if (decision.affected_claim_refs.some(ref => !claimRefs.includes(ref))) throw new Error("Resolution contains claims outside the conflict");
+    if (new Set(decision.affected_claim_refs).size !== decision.affected_claim_refs.length) throw new Error("Resolution claim references must be unique");
+    if (decision.outcome !== "remain_open" && !decision.affected_claim_refs.length) throw new Error("Resolution outcome requires explicit affected claims");
+    if (decision.outcome === "accept_multiple_claims_with_narrowed_scopes" && (decision.affected_claim_refs.length < 2 || decision.resulting_scopes.length !== decision.affected_claim_refs.length)) throw new Error("Narrowed scopes must correspond to every accepted claim");
     const resolutionId = newId("user_conflict_resolution");
     const queueIdempotencyKey = `resolution:${input.idempotency_key}`;
     const packetId = `packet:argon:${digest(queueIdempotencyKey).slice(0, 24)}`;
@@ -1199,8 +1272,10 @@ export class ProjectRuntime {
       created_by: input.actor_principal, conflict_id: input.conflict_id, expected_conflict_revision: input.expected_conflict_revision,
       resolution_statement: input.resolution_statement, source_turn_ref: input.source_turn_ref, user_statement_hash: input.user_statement_hash,
       idempotency_key: input.idempotency_key, submitted_by_principal: input.actor_principal, attestation_mode: "verified_principal", change_packet_id: packetId,
+      resolution_decision: decision, authorization_hash: authorizationHash,
     };
     const conflict: KnowledgeRecord = { ...found.record, status: "resolution_pending", resolution_ref: resolutionId, resolution_locked_at: createdAt, updated_at: createdAt };
+    resolution.locked_conflict_revision = digest(renderRecord(conflict, found.body));
     const packet: KnowledgeRecord = {
       ...common, id: packetId, type: "maintenance_change_packet", title: `Apply resolution ${resolutionId}`, status: "queued",
       created_by: "conflict-service", trigger: "user_resolution_locked", idempotency_key: input.idempotency_key,
@@ -1210,8 +1285,8 @@ export class ProjectRuntime {
       { directory: "registry", filename: `${safeName(resolution.id)}.md`, content: renderRecord(resolution, "# Locked user conflict resolution\n\nThis record is immutable input to the maintenance harness.\n") },
       { directory: this.directoryFor(conflict) as CanonicalDirectory, filename: `${safeName(conflict.id)}.md`, content: renderRecord(conflict, found.body) },
       { directory: "registry", filename: `${safeName(packet.id)}.md`, content: renderRecord(packet) },
-    ]);
-    await this.enqueueMaintenance({ project_id: found.record.project_id, trigger: "user_resolution_locked", idempotency_key: queueIdempotencyKey, text_context: input.resolution_statement, evidence_refs: [input.conflict_id, resolutionId], locked_user_resolution_ref: resolutionId });
+    ], { expectedParent: base?.knowledge_revision ?? null });
+    await this.enqueueMaintenance({ project_id: found.record.project_id, actor_principal: input.actor_principal, trigger: "user_resolution_locked", idempotency_key: queueIdempotencyKey, text_context: input.resolution_statement, evidence_refs: [input.conflict_id, resolutionId], locked_user_resolution_ref: resolutionId });
     await this.appendAudit({ type: "user_conflict_resolution_locked", project_id: found.record.project_id, conflict_id: input.conflict_id, resolution_id: resolutionId, change_packet_id: packetId, actor: input.actor_principal });
     const updated = await this.get(input.conflict_id);
     return { conflict_id: input.conflict_id, status: "resolution_pending", resolution_id: resolutionId, change_packet_id: packetId, current_conflict_revision: updated ? digest(renderRecord(updated.record, updated.body)) : currentRevision, actor_principal: input.actor_principal, attestation_mode: "verified_principal" };
@@ -1241,40 +1316,10 @@ export class ProjectRuntime {
     const markerIndex = packet.text_context.indexOf(mutableMarker);
     const stableContext = (markerIndex >= 0 ? packet.text_context.slice(0, markerIndex) : packet.text_context).trim();
     const routingText = stableContext.toLowerCase();
-    const documentParts: string[] = [];
-    const headingCandidates: Array<{ score: number; text: string }> = [];
-    const documentCandidates = items.filter(item => item.record.project_id === packet.project_id && confidentialityAllowed(item.record, "internal")
-      && (item.record.id === packet.project_id || packet.candidate_section_refs.includes(item.record.id)));
-    for (const item of documentCandidates) {
-      const lines = item.body.split("\n");
-      const headings = lines.map((line, index) => {
-        const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
-        return match ? { index, level: match[1]!.length, title: match[2]! } : null;
-      }).filter((value): value is { index: number; level: number; title: string } => value !== null);
-      for (let index = 0; index < headings.length; index += 1) {
-        const heading = headings[index]!;
-        const next = headings.slice(index + 1).find(candidate => candidate.level <= heading.level);
-        const content = lines.slice(heading.index + 1, next?.index ?? lines.length).join("\n").trim();
-        if (!content || content.length > 2_500) continue;
-        const title = heading.title.toLowerCase();
-        let score = routingText.includes(title) ? 20 : 0;
-        for (let offset = 0; offset + 1 < title.length; offset += 1) if (routingText.includes(title.slice(offset, offset + 2))) score += 2;
-        if (guidedSections.has(item.record.id)) score += 1;
-        if (score === 0) continue;
-        const expectedRevision = item.record.id === packet.project_id
-          ? String(item.record.main_revision ?? digest(item.body))
-          : String(item.record.revision_hash ?? digest(item.body));
-        headingCandidates.push({ score, text: `## Mutable document block\ntarget_ref: ${item.record.id}\nexpected_revision: ${expectedRevision}\nblock_key: heading:${heading.title}\nprevious_block_hash: ${digest(content)}\n\n${content}` });
-      }
-    }
-    let documentChars = 0;
-    for (const candidate of headingCandidates.sort((a, b) => b.score - a.score).slice(0, 4)) {
-      if (documentChars + candidate.text.length > 3_000) continue;
-      documentParts.push(candidate.text);
-      documentChars += candidate.text.length;
-    }
+    const { documentParts, mutableBlocks } = this.maintenanceBlocks(items, packet.project_id, packet.candidate_section_refs, routingText, guidedSections);
+    const capabilities = this.maintenanceCapabilities(items, packet.project_id, packet.candidate_section_refs, packet.evidence_refs);
     const openConflictRefs = items
-      .filter(item => item.record.project_id === packet.project_id && (item.record.type === "conflict" || item.record.type === "conflict_record") && (item.record.status === "open" || item.record.status === "resolution_pending"))
+      .filter(item => item.record.project_id === packet.project_id && confidentialityAllowed(item.record, "internal") && (item.record.type === "conflict" || item.record.type === "conflict_record") && (item.record.status === "open" || item.record.status === "resolution_pending"))
       .map(item => item.record.id)
       .slice(0, 30);
     return {
@@ -1285,20 +1330,25 @@ export class ProjectRuntime {
         topology_revision: pointer?.topology_revision ?? "legacy",
         index_revision: pointer?.index_revision ?? "unbuilt",
       },
-      open_conflict_refs: openConflictRefs,
+      open_conflict_refs: openConflictRefs, mutable_blocks: mutableBlocks, ...capabilities,
       text_context: [stableContext, ...documentParts].filter(Boolean).join("\n\n").slice(0, 6_000),
     };
   }
 
   async applyMaintenancePlan(packet: ChangePacket, plan: MaintenancePlan, actor = "maintenance-harness"): Promise<{ knowledge_revision: string; changed_records: string[] }> {
+    if (this.options.readOnly) throw new Error("Read-only runtime cannot apply maintenance");
+    packet = changePacketSchema.parse(packet);
+    plan = validateMaintenancePlan(packet, plan);
     const pointer = await this.revisionStore.pointer();
     if ((pointer?.knowledge_revision ?? "legacy") !== plan.base_knowledge_revision) throw new Error("Maintenance plan base revision is stale");
+    if ((pointer?.topology_revision ?? "legacy") !== plan.expected_topology_revision) throw new Error("Maintenance topology revision is stale");
     const items = await this.records();
     const working = new Map(items.map(item => [item.record.id, { record: { ...item.record }, body: item.body }]));
     // Every operation in one proposal refers to the same immutable base.
     // Block hashes below still use the evolving body to reject overlap.
     const documentBaseRevisions = new Map(items.map(item => [item.record.id, item.record.type === "project"
       ? String(item.record.main_revision ?? digest(item.body)) : String(item.record.revision_hash ?? digest(item.body))]));
+    const recordBaseRevisions = new Map(items.map(item => [item.record.id, digest(renderRecord(item.record, item.body))]));
     const changed = new Set<string>();
     const requireRecord = (id: string) => { const item = working.get(id); if (!item) throw new Error(`Maintenance target not found: ${id}`); return item; };
     // Candidate memories may be inspected to register uncertainty, but cannot
@@ -1307,55 +1357,14 @@ export class ProjectRuntime {
     for (const operation of plan.operations) {
       const refs = operation.op === "patch_main" || operation.op === "patch_section" || operation.op === "update_topology"
         ? operation.patch.evidence_refs
-        : operation.op === "create_section" ? operation.proposal.evidence_refs : [];
+        : operation.op === "create_section" ? operation.proposal.evidence_refs
+        : operation.op === "register_conflict" ? operation.conflict.evidence_refs
+        : operation.op === "observe_conflict" ? operation.observation.evidence_refs : [];
       for (const ref of refs) {
         const evidence = working.get(ref)?.record;
-        if (evidence?.type === "memory" && (evidence.status !== "accepted" || evidence.project_id !== packet.project_id)) {
-          throw new Error("Maintenance cannot use unaccepted or cross-project memory to modify canonical documents or topology");
-        }
+        if (!evidence || !eligibleEvidenceRecord(evidence, packet.project_id)) throw new Error("Maintenance evidence is not eligible in this project");
       }
     }
-    const patchBody = (body: string, blockKey: string, replacement: string): string => {
-      if (blockKey === "document") return replacement.trimEnd() + "\n";
-      if (blockKey.startsWith("heading:")) {
-        const title = blockKey.slice("heading:".length);
-        const lines = body.split("\n");
-        const headingIndex = lines.findIndex(line => /^(#{1,6})\s+(.+?)\s*$/.exec(line)?.[2] === title);
-        if (headingIndex < 0) throw new Error(`Stable heading block not found: ${blockKey}`);
-        const level = /^(#{1,6})/.exec(lines[headingIndex]!)![1]!.length;
-        let end = lines.length;
-        for (let index = headingIndex + 1; index < lines.length; index += 1) {
-          const match = /^(#{1,6})\s+/.exec(lines[index]!);
-          if (match && match[1]!.length <= level) { end = index; break; }
-        }
-        return [...lines.slice(0, headingIndex + 1), "", replacement.trim(), "", ...lines.slice(end)].join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-      }
-      const start = `<!-- kb:block ${blockKey} -->`;
-      const end = `<!-- /kb:block ${blockKey} -->`;
-      const from = body.indexOf(start); const to = body.indexOf(end);
-      if (from < 0 || to < from) throw new Error(`Stable block not found: ${blockKey}`);
-      return `${body.slice(0, from + start.length)}\n${replacement.trim()}\n${body.slice(to)}`;
-    };
-    const blockHash = (body: string, blockKey: string): string => {
-      if (blockKey === "document") return digest(body);
-      if (blockKey.startsWith("heading:")) {
-        const title = blockKey.slice("heading:".length);
-        const lines = body.split("\n");
-        const headingIndex = lines.findIndex(line => /^(#{1,6})\s+(.+?)\s*$/.exec(line)?.[2] === title);
-        if (headingIndex < 0) throw new Error(`Stable heading block not found: ${blockKey}`);
-        const level = /^(#{1,6})/.exec(lines[headingIndex]!)![1]!.length;
-        let end = lines.length;
-        for (let index = headingIndex + 1; index < lines.length; index += 1) {
-          const match = /^(#{1,6})\s+/.exec(lines[index]!);
-          if (match && match[1]!.length <= level) { end = index; break; }
-        }
-        return digest(lines.slice(headingIndex + 1, end).join("\n").trim());
-      }
-      const start = `<!-- kb:block ${blockKey} -->`; const end = `<!-- /kb:block ${blockKey} -->`;
-      const from = body.indexOf(start); const to = body.indexOf(end);
-      if (from < 0 || to < from) throw new Error(`Stable block not found: ${blockKey}`);
-      return digest(body.slice(from + start.length, to).trim());
-    };
     for (const operation of plan.operations) {
       if (operation.op === "no_change") continue;
       if (operation.op === "patch_main" || operation.op === "patch_section") {
@@ -1365,8 +1374,8 @@ export class ProjectRuntime {
           : item.record.type !== "knowledge_section" || !packet.candidate_section_refs.includes(item.record.id))) {
           throw new Error("Maintenance document target type or project scope mismatch");
         }
-        if (documentBaseRevisions.get(item.record.id) !== operation.patch.expected_revision || blockHash(item.body, operation.patch.block_key) !== operation.patch.previous_block_hash) throw new Error(`Maintenance document revision conflict: ${item.record.id}`);
-        item.body = patchBody(item.body, operation.patch.block_key, operation.patch.replacement_markdown);
+        if (documentBaseRevisions.get(item.record.id) !== operation.patch.expected_revision) throw new Error(`Maintenance document revision conflict: ${item.record.id}`);
+        item.body = patchMutableHeading(item.body, operation.patch, operation.patch.replacement_markdown);
         const revision = digest(item.body);
         if (operation.op === "patch_main") {
           item.record.main_revision = revision;
@@ -1387,7 +1396,15 @@ export class ProjectRuntime {
         const project = requireRecord(packet.project_id); project.record.section_refs = uniqueStrings([...asStrings(project.record.section_refs), id]); project.record.updated_at = timestamp;
         changed.add(id); changed.add(project.record.id);
       } else if (operation.op === "update_topology") {
-        const item = requireRecord(operation.patch.target_ref); item.record.related_refs = uniqueStrings([...asStrings(item.record.related_refs), ...operation.patch.add_refs]); item.record.updated_at = now(); changed.add(item.record.id);
+        const item = requireRecord(operation.patch.target_ref);
+        if (item.record.project_id !== packet.project_id || !confidentialityAllowed(item.record, "internal") || !(item.record.type === "project" && item.record.id === packet.project_id || item.record.type === "knowledge_section" && item.record.status === "active" && packet.candidate_section_refs.includes(item.record.id))) throw new Error("Maintenance topology target type or project scope mismatch");
+        if (recordBaseRevisions.get(item.record.id) !== operation.patch.expected_revision) throw new Error("Maintenance topology record revision conflict");
+        for (const ref of operation.patch.add_refs) {
+          const target = requireRecord(ref).record;
+          const routedDocument = target.id === packet.project_id && target.type === "project" || target.type === "knowledge_section" && target.status === "active" && packet.candidate_section_refs.includes(target.id);
+          if (ref === item.record.id || target.project_id !== packet.project_id || !confidentialityAllowed(target, "internal") || !(routedDocument || packet.evidence_refs.includes(ref) && eligibleEvidenceRecord(target, packet.project_id))) throw new Error("Maintenance topology reference is not eligible");
+        }
+        item.record.related_refs = uniqueStrings([...asStrings(item.record.related_refs), ...operation.patch.add_refs]); item.record.updated_at = now(); item.record.updated_by = actor; changed.add(item.record.id);
       } else if (operation.op === "register_conflict") {
         const id = `conflict:argon:${digest(`${packet.packet_id}:${operation.conflict.topic}`).slice(0, 24)}`;
         if (!working.has(id)) {
@@ -1398,7 +1415,9 @@ export class ProjectRuntime {
         }
       } else if (operation.op === "observe_conflict") {
         const item = requireRecord(operation.observation.conflict_id);
-        if (item.record.type !== "conflict" || item.record.status === "resolved") throw new Error("Resolved conflict counterevidence requires a new open conflict");
+        if (item.record.type !== "conflict" || item.record.status !== "open" || item.record.project_id !== packet.project_id || !confidentialityAllowed(item.record, "internal") || !packet.open_conflict_refs.includes(item.record.id)) throw new Error("Conflict observations require a routed open conflict in this project");
+        if (recordBaseRevisions.get(item.record.id) !== operation.observation.expected_conflict_revision) throw new Error("Maintenance conflict revision mismatch");
+        if (operation.observation.target_claim_variant_refs.some(ref => !conflictClaimRefs(item.record).includes(ref))) throw new Error("Observed claim does not belong to this conflict");
         const observations = Array.isArray(item.record.evidence_observations) ? item.record.evidence_observations : [];
         item.record.evidence_observations = [...observations, { target_claim_variant_refs: operation.observation.target_claim_variant_refs, evidence_refs: operation.observation.evidence_refs, observed_at: now(), packet_id: packet.packet_id }];
         item.record.last_seen_revision = plan.base_knowledge_revision; item.record.updated_at = now(); changed.add(item.record.id);
@@ -1406,11 +1425,17 @@ export class ProjectRuntime {
     }
     if (plan.typed_resolution) {
       const conflict = requireRecord(plan.typed_resolution.conflict_id);
-      if (conflict.record.status !== "resolution_pending" || conflict.record.resolution_ref !== plan.typed_resolution.locked_user_resolution_ref) throw new Error("Conflict is not locked by this resolution");
+      const resolution = requireRecord(plan.typed_resolution.locked_user_resolution_ref);
+      if (conflict.record.type !== "conflict" || conflict.record.project_id !== packet.project_id || conflict.record.status !== "resolution_pending" || conflict.record.resolution_ref !== resolution.record.id) throw new Error("Conflict is not locked by this resolution");
+      if (resolution.record.type !== "user_conflict_resolution" || resolution.record.status !== "locked" || resolution.record.project_id !== packet.project_id || resolution.record.conflict_id !== conflict.record.id || resolution.record.attestation_mode !== "verified_principal" || resolution.record.submitted_by_principal !== resolution.record.created_by) throw new Error("Resolution authorization record is invalid");
+      if (resolution.record.change_packet_id !== packet.packet_id || resolution.record.locked_conflict_revision !== recordBaseRevisions.get(conflict.record.id)) throw new Error("Locked conflict revision or packet binding mismatch");
+      if (digest(String(resolution.record.resolution_statement)) !== resolution.record.user_statement_hash || resolutionAuthorization(resolution.record) !== resolution.record.authorization_hash || resolution.record.authorization_hash !== packet.locked_user_resolution_hash) throw new Error("Resolution authorization digest mismatch");
+      const decision = conflictResolutionDecisionSchema.parse(resolution.record.resolution_decision);
+      if (JSON.stringify(decision) !== JSON.stringify(packet.locked_user_resolution_decision) || decision.affected_claim_refs.some(ref => !conflictClaimRefs(conflict.record).includes(ref))) throw new Error("Resolution does not match the user-authorized claims and scopes");
       conflict.record.status = plan.typed_resolution.outcome === "remain_open" ? "open" : "resolved";
       conflict.record.resolution = { ...plan.typed_resolution, applied_at: now(), packet_id: packet.packet_id };
       conflict.record.updated_at = now(); changed.add(conflict.record.id);
-      const resolution = requireRecord(plan.typed_resolution.locked_user_resolution_ref); resolution.record.status = "applied"; resolution.record.updated_at = now(); changed.add(resolution.record.id);
+      resolution.record.status = "applied"; resolution.record.updated_at = now(); changed.add(resolution.record.id);
     }
     if (changed.size === 0) return { knowledge_revision: pointer?.knowledge_revision ?? "legacy", changed_records: [] };
     const planRecordId = `maintenance_plan:argon:${digest(packet.packet_id).slice(0, 24)}`;
@@ -1418,7 +1443,7 @@ export class ProjectRuntime {
     working.set(planRecordId, { record: { id: planRecordId, type: "maintenance_plan", title: `Maintenance plan ${packet.packet_id}`, status: "committed", project_id: packet.project_id, created_at: timestamp, updated_at: timestamp, created_by: actor, confidentiality: "internal", schema_version: 1, packet_id: packet.packet_id, prompt_version: plan.prompt_version, tool_schema_version: plan.tool_schema_version, operations: plan.operations, typed_resolution: plan.typed_resolution }, body: "# Committed maintenance plan\n" });
     changed.add(planRecordId);
     const mutations = [...changed].map(id => { const item = requireRecord(id); return { directory: this.directoryFor(item.record) as CanonicalDirectory, filename: `${safeName(id)}.md`, content: renderRecord(item.record, item.body) }; });
-    const published = await this.revisionStore.publish(mutations);
+    const published = await this.revisionStore.publish(mutations, { expectedParent: pointer?.knowledge_revision ?? null });
     await this.appendAudit({ type: "maintenance_plan_committed", project_id: packet.project_id, packet_id: packet.packet_id, actor, knowledge_revision: published.knowledge_revision, changed_records: [...changed] });
     return { knowledge_revision: published.knowledge_revision, changed_records: [...changed] };
   }
@@ -1601,7 +1626,7 @@ export class ProjectRuntime {
       local_normalization: { parser: parsed.parser, markdown_path: parsed.markdown_path, warnings: parsed.warnings, source_sha256: sourceHash, completed_at: now() },
     }, existing.body);
     await this.appendAudit({ type: "artifact_local_normalized", actor, artifact_id: artifact.id, source_sha256: sourceHash, ...parsed, preserved_existing_text: preserve });
-    if (queueMaintenance) await this.enqueueMaintenance({ project_id: artifact.project_id, trigger: "artifact_parsed", idempotency_key: `artifact-local-normalized:${artifact.id}:${digest(text)}`, text_context: `Local document text/images normalized: ${artifact.id}. Warnings: ${parsed.warnings.join("; ")}`, evidence_refs: [artifact.id] });
+    if (queueMaintenance) await this.enqueueMaintenance({ project_id: artifact.project_id, actor_principal: actor, trigger: "artifact_parsed", idempotency_key: `artifact-local-normalized:${artifact.id}:${digest(text)}`, text_context: `Local document text/images normalized: ${artifact.id}. Warnings: ${parsed.warnings.join("; ")}`, evidence_refs: [artifact.id] });
     return { artifact_id: artifact.id, ...parsed, preserved_existing_text: preserve };
   }
 
@@ -1675,7 +1700,7 @@ export class ProjectRuntime {
         image_associations: imageAssociations,
       }, existing.body);
       await this.appendAudit({ type: "mineru_api_parse", artifact_id: artifact.id, actor, egress: "mineru_api", outcome: "parsed", page_count: pages.length });
-      if (options.queueMaintenance !== false) await this.enqueueMaintenance({ project_id: artifact.project_id, trigger: "artifact_parsed", idempotency_key: `parsed:${artifact.id}:${digest(normalizedMarkdown)}`, text_context: `Artifact parsing completed: ${artifact.title}. Full normalized evidence is now available.`, evidence_refs: [artifact.id] });
+      if (options.queueMaintenance !== false) await this.enqueueMaintenance({ project_id: artifact.project_id, actor_principal: actor, trigger: "artifact_parsed", idempotency_key: `parsed:${artifact.id}:${digest(normalizedMarkdown)}`, text_context: `Artifact parsing completed: ${artifact.title}. Full normalized evidence is now available.`, evidence_refs: [artifact.id] });
       return { artifact_id: artifact.id, status: "parsed", normalized_markdown_path: normalizedPath, page_count: pages.length };
     } catch (error) {
       // Retain opaque task identifiers for a later provider result download,

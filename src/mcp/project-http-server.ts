@@ -20,6 +20,7 @@ const DEFAULT_MAX_REQUEST_BYTES = 14 * 1024 * 1024;
 
 type ProjectServerProfile = Exclude<ProjectProfile, "upstream-full">;
 type Session = { transport: WebStandardStreamableHTTPServerTransport; lastSeenAt: number; principal: ProjectPrincipal };
+type SessionReservation = { principalId: string; createdAt: number; transport?: WebStandardStreamableHTTPServerTransport; release: () => void };
 
 export type LightweightProjectHttpOptions = {
   /** Dedicated connector mode: always project-read, no skill updates, no writes. */
@@ -114,27 +115,48 @@ export async function startLightweightProjectHttpServer(
   const runtime = new ProjectRuntime(projectRoot, { readOnly: options.chatgptReadOnly, retrievalProvider: options.retrievalProvider });
   await runtime.initialize();
   const sessions = new Map<string, Session>();
+  const reservations = new Set<SessionReservation>();
+  const maxSessions = options.maxSessions ?? 1024;
+  if (!Number.isSafeInteger(maxSessions) || maxSessions < 1) { runtime.close(); throw new Error("maxSessions must be a positive integer"); }
+  const maxPrincipalSessions = Math.min(maxSessions, 64);
   const startedAt = Date.now();
+  let stopping = false;
 
-  async function createSession(principal: ProjectPrincipal): Promise<WebStandardStreamableHTTPServerTransport> {
-    let transport: WebStandardStreamableHTTPServerTransport;
-    transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: randomUUID,
-      enableJsonResponse: true,
-      onsessioninitialized: (sessionId: string) => {
-        sessions.set(sessionId, { transport, lastSeenAt: Date.now(), principal });
-      },
-    });
-    const server = createLightweightProjectServer(runtime, principal, options);
-    await server.connect(transport);
-    transport.onclose = () => {
-      if (transport.sessionId) sessions.delete(transport.sessionId);
-    };
-    return transport;
+  async function createSession(principal: ProjectPrincipal): Promise<WebStandardStreamableHTTPServerTransport | undefined> {
+    if (stopping || reservations.size >= maxSessions || [...reservations].filter(item => item.principalId === principal.principal_id).length >= maxPrincipalSessions) return undefined;
+    const reservation: SessionReservation = { principalId: principal.principal_id, createdAt: Date.now(), release: () => {
+      reservations.delete(reservation);
+      if (reservation.transport?.sessionId) sessions.delete(reservation.transport.sessionId);
+    } };
+    // Reserve synchronously, before connect() or any other await. The quota
+    // includes transports whose initialize response has not been produced.
+    reservations.add(reservation);
+    try {
+      const transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: randomUUID,
+        enableJsonResponse: true,
+        onsessioninitialized: (sessionId: string) => {
+          if (stopping || !reservations.has(reservation)) throw new Error("Session initialization expired");
+          sessions.set(sessionId, { transport, lastSeenAt: Date.now(), principal });
+        },
+      });
+      reservation.transport = transport;
+      // The SDK wraps an existing onclose callback during connect(), so this
+      // also covers a transport that closes before connect() has resolved.
+      transport.onclose = reservation.release;
+      const server = createLightweightProjectServer(runtime, principal, options);
+      await server.connect(transport);
+      return transport;
+    } catch (error) {
+      reservation.release();
+      await reservation.transport?.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   const httpServer = createServer(async (req, res) => {
     const pathname = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`).pathname;
+    let initializingTransport: WebStandardStreamableHTTPServerTransport | undefined;
     try {
       if (pathname === "/health" && req.method === "GET") {
         const usage = process.memoryUsage();
@@ -200,10 +222,11 @@ export async function startLightweightProjectHttpServer(
             transport = session.transport;
           }
         } else if (isInitializeRequest(body)) {
-          if (sessions.size >= (options.maxSessions ?? 1024)) {
-            json(res, 429, { error: "MCP session limit reached" }); return;
-          }
           transport = await createSession(requestPrincipal);
+          if (!transport) { json(res, 429, { error: "MCP session limit reached" }); return; }
+          initializingTransport = transport;
+          const pending = transport;
+          res.once("close", () => { if (!res.writableFinished) void pending.close().catch(() => undefined); });
         }
         if (!transport) {
           json(res, sessionId ? 404 : 400, {
@@ -215,8 +238,18 @@ export async function startLightweightProjectHttpServer(
         }
         const request = new Request(`http://${host}:${port}/mcp`, { method: "POST", headers, body: rawBody });
         const response = await transport.handleRequest(request, { parsedBody: body });
+        const responseBody = Buffer.from(await response.arrayBuffer());
+        let validInitializeResponse = true;
+        if (initializingTransport) {
+          try { const value = JSON.parse(responseBody.toString("utf8")); validInitializeResponse = value.error === undefined && typeof value.result?.protocolVersion === "string"; }
+          catch { validInitializeResponse = false; }
+        }
+        if (initializingTransport && (response.status >= 400 || !validInitializeResponse || !transport.sessionId || res.destroyed)) {
+          await initializingTransport.close();
+        }
         res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-        res.end(Buffer.from(await response.arrayBuffer()));
+        res.end(responseBody);
+        initializingTransport = undefined;
         return;
       }
 
@@ -240,6 +273,7 @@ export async function startLightweightProjectHttpServer(
       res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
       res.end(Buffer.from(await response.arrayBuffer()));
     } catch (error) {
+      if (initializingTransport) await initializingTransport.close().catch(() => undefined);
       if (error instanceof Error && error.message === "REQUEST_TOO_LARGE") {
         json(res, 413, { error: "Request body exceeds the configured limit" });
         return;
@@ -262,15 +296,20 @@ export async function startLightweightProjectHttpServer(
       sessions.delete(id);
       void session.transport.close().catch(() => undefined);
     }
+    for (const reservation of reservations) {
+      if (reservation.transport?.sessionId || reservation.createdAt >= cutoff) continue;
+      reservation.release();
+      void reservation.transport?.close().catch(() => undefined);
+    }
   }, Math.min(60_000, Math.floor(sessionTtlMs / 2)));
   sweeper.unref();
 
-  let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
     clearInterval(sweeper);
-    await Promise.allSettled([...sessions.values()].map(session => session.transport.close()));
+    await Promise.allSettled([...reservations].map(reservation => reservation.transport?.close()));
+    reservations.clear();
     sessions.clear();
     await new Promise<void>((resolve, reject) => httpServer.close(error => error ? reject(error) : resolve()));
     runtime.close();

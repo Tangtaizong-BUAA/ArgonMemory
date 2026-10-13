@@ -4,6 +4,23 @@ export const MAINTENANCE_HARNESS_VERSION = "0.5.0";
 export const MAINTENANCE_PROMPT_VERSION = "argon-memory-maintenance/0.5.0";
 export const MAINTENANCE_TOOL_SCHEMA_VERSION = "argon-memory-maintenance-tools/0.5.0";
 export const DEFAULT_MAINTENANCE_MODEL = "qwen3.7-flash";
+export const MAX_MAINTENANCE_MEDIA_BYTES = 8 * 1024 * 1024;
+export const MAX_MAINTENANCE_PACKET_MEDIA_BYTES = 16 * 1024 * 1024;
+
+export const conflictResolutionDecisionSchema = z.object({
+  outcome: z.enum(["supersede_one_claim", "accept_multiple_claims_with_narrowed_scopes", "reject_all_claims_and_record_new_statement", "reject_candidate_claim", "remain_open"]),
+  affected_claim_refs: z.array(z.string().min(1).max(2000)).max(50),
+  resulting_scopes: z.array(z.string().min(1).max(2000)).max(50),
+}).strict();
+export type ConflictResolutionDecision = z.infer<typeof conflictResolutionDecisionSchema>;
+
+export const mutableDocumentBlockSchema = z.object({
+  target_ref: z.string().min(1).max(500),
+  expected_revision: z.string().regex(/^[a-f0-9]{64}$/),
+  block_key: z.string().regex(/^heading:[^\r\n]+$/).max(160),
+  previous_block_hash: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type MutableDocumentBlock = z.infer<typeof mutableDocumentBlockSchema>;
 
 export const evidenceLocatorSchema = z.object({
   page: z.number().int().positive().optional(),
@@ -24,9 +41,25 @@ export const mediaDescriptorSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   locator: evidenceLocatorSchema,
   transport: z.enum(["base64_data_uri", "signed_url"]),
-  value: z.string().min(1),
+  value: z.string().min(1).max(4 * Math.ceil(MAX_MAINTENANCE_MEDIA_BYTES / 3) + 256),
+  size_bytes: z.number().int().positive().max(MAX_MAINTENANCE_MEDIA_BYTES),
   expires_at: z.string().datetime().optional(),
   native_video_required: z.boolean().default(false),
+}).superRefine((media, context) => {
+  if (media.transport === "base64_data_uri") {
+    const prefix = `data:${media.mime_type};base64,`;
+    if (!media.value.startsWith(prefix) || media.value.length > 4 * Math.ceil(MAX_MAINTENANCE_MEDIA_BYTES / 3) + 256) {
+      context.addIssue({ code: "custom", message: "Invalid or oversized maintenance media data URI" }); return;
+    }
+    const encoded = media.value.slice(prefix.length);
+    const bytes = Buffer.from(encoded, "base64");
+    if (bytes.length !== media.size_bytes || bytes.toString("base64") !== encoded) context.addIssue({ code: "custom", message: "Maintenance media size or encoding mismatch" });
+  } else {
+    try {
+      const url = new URL(media.value);
+      if (url.protocol !== "https:" || url.username || url.password || media.value.length > 4096) throw new Error();
+    } catch { context.addIssue({ code: "custom", message: "Maintenance signed media requires a bounded HTTPS URL" }); }
+  }
 });
 
 export const maintenanceBudgetSchema = z.object({
@@ -37,6 +70,7 @@ export const maintenanceBudgetSchema = z.object({
   max_sections: z.number().int().min(1).max(6).default(6),
   max_evidence_units: z.number().int().min(1).max(40).default(40),
   max_multimodal_assets: z.number().int().min(0).max(12).default(12),
+  max_multimodal_bytes: z.number().int().min(0).max(MAX_MAINTENANCE_PACKET_MEDIA_BYTES).default(MAX_MAINTENANCE_PACKET_MEDIA_BYTES),
   max_cost_usd: z.number().positive(),
 });
 
@@ -44,6 +78,7 @@ export const changePacketSchema = z.object({
   schema: z.literal("argon-memory-change-packet/v1"),
   packet_id: z.string().min(1),
   project_id: z.string().min(1),
+  actor_principal: z.string().min(1).max(240).default("maintenance-system"),
   idempotency_key: z.string().min(8),
   trigger: z.enum(["artifact_parsed", "resource_published", "context_captured", "work_finished", "user_resolution_locked", "stale_evidence", "calibration", "legacy_proposal"]),
   base_revisions: z.object({
@@ -54,6 +89,10 @@ export const changePacketSchema = z.object({
   evidence_refs: z.array(z.string()).max(40),
   candidate_section_refs: z.array(z.string()).max(6),
   open_conflict_refs: z.array(z.string()).max(30),
+  // Capabilities are server-generated fields, never parsed from source prose.
+  mutable_blocks: z.array(mutableDocumentBlockSchema).max(4).default([]),
+  topology_targets: z.array(z.object({ target_ref: z.string().min(1), expected_revision: z.string().regex(/^[a-f0-9]{64}$/), allowed_add_refs: z.array(z.string()).max(100) })).max(7).default([]),
+  routed_conflicts: z.array(z.object({ conflict_id: z.string().min(1), expected_conflict_revision: z.string().regex(/^[a-f0-9]{64}$/), claim_variant_refs: z.array(z.string()).max(50) })).max(30).default([]),
   text_context: z.string().max(24000),
   media: z.array(mediaDescriptorSchema).max(12),
   budget: maintenanceBudgetSchema,
@@ -70,13 +109,19 @@ export const changePacketSchema = z.object({
     warnings: z.array(z.string()).max(20),
   }).optional(),
   locked_user_resolution_ref: z.string().optional(),
+  locked_user_resolution_hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  locked_user_resolution_decision: conflictResolutionDecisionSchema.optional(),
+}).superRefine((packet, context) => {
+  const size = packet.media.reduce((total, media) => total + media.size_bytes, 0);
+  if (size > packet.budget.max_multimodal_bytes || size > MAX_MAINTENANCE_PACKET_MEDIA_BYTES || packet.media.length > packet.budget.max_multimodal_assets) context.addIssue({ code: "custom", message: "Maintenance packet exceeds the media admission budget" });
+  if (packet.locked_user_resolution_ref && (!packet.locked_user_resolution_hash || !packet.locked_user_resolution_decision)) context.addIssue({ code: "custom", message: "Locked user resolution requires structured authorization" });
 });
 
 const evidenceRefs = z.array(z.string().min(1)).min(1).max(40);
 const documentPatchSchema = z.object({
   target_ref: z.string().min(1),
   expected_revision: z.string().min(1),
-  block_key: z.string().min(1).max(160),
+  block_key: mutableDocumentBlockSchema.shape.block_key,
   previous_block_hash: z.string().regex(/^[a-f0-9]{64}$/),
   replacement_markdown: z.string().max(80000),
   summary: z.string().min(8).max(2000).optional(),
@@ -106,9 +151,7 @@ export const maintenancePlanSchema = z.object({
   typed_resolution: z.object({
     conflict_id: z.string().min(1),
     locked_user_resolution_ref: z.string().min(1),
-    outcome: z.enum(["supersede_one_claim", "accept_multiple_claims_with_narrowed_scopes", "reject_all_claims_and_record_new_statement", "reject_candidate_claim", "remain_open"]),
-    affected_claim_refs: z.array(z.string()).max(50),
-    resulting_scopes: z.array(z.string()).max(50),
+    ...conflictResolutionDecisionSchema.shape,
   }).optional(),
 });
 
@@ -120,7 +163,7 @@ export type MaintenanceBudget = z.infer<typeof maintenanceBudgetSchema>;
 // Do not repair missing evidence/revisions by inventing them after generation.
 export const maintenancePlanJsonSchema = z.toJSONSchema(maintenancePlanSchema, { target: "draft-7" });
 
-const PROTECTED_BLOCK = /(?:^|[-_:])(conflicts?|global[-_]conflict|conflict[-_]refs?)(?:$|[-_:])|冲突/i;
+export const PROTECTED_BLOCK = /(?:^|[\s\W_])(conflicts?|global[\s_-]conflict|conflict[\s_-]refs?)(?:$|[\s\W_])|冲突/i;
 
 export function validateMaintenancePlan(packetInput: unknown, planInput: unknown): MaintenancePlan {
   const packet = changePacketSchema.parse(packetInput);
@@ -133,6 +176,17 @@ export function validateMaintenancePlan(packetInput: unknown, planInput: unknown
     if (operation.op === "patch_section" && !packet.candidate_section_refs.includes(operation.patch.target_ref)) throw new Error("Maintenance section target is outside the routed ChangePacket sections");
     if ((operation.op === "patch_main" || operation.op === "patch_section") && PROTECTED_BLOCK.test(operation.patch.block_key)) {
       throw new Error("Generic maintenance patches cannot modify conflict-protected blocks");
+    }
+    if (operation.op === "patch_main" || operation.op === "patch_section") {
+      if (!packet.mutable_blocks.some(block => block.target_ref === operation.patch.target_ref && block.block_key === operation.patch.block_key && block.expected_revision === operation.patch.expected_revision && block.previous_block_hash === operation.patch.previous_block_hash)) throw new Error("Maintenance block is outside the routed mutable block capabilities");
+    }
+    if (operation.op === "update_topology") {
+      const capability = packet.topology_targets.find(target => target.target_ref === operation.patch.target_ref);
+      if (!capability || capability.expected_revision !== operation.patch.expected_revision || operation.patch.add_refs.some(ref => !capability.allowed_add_refs.includes(ref))) throw new Error("Maintenance topology operation is outside the routed capabilities");
+    }
+    if (operation.op === "observe_conflict") {
+      const capability = packet.routed_conflicts.find(conflict => conflict.conflict_id === operation.observation.conflict_id);
+      if (!packet.open_conflict_refs.includes(operation.observation.conflict_id) || !capability || capability.expected_conflict_revision !== operation.observation.expected_conflict_revision || operation.observation.target_claim_variant_refs.some(ref => !capability.claim_variant_refs.includes(ref))) throw new Error("Maintenance conflict observation is outside the routed capabilities");
     }
     const refs = operation.op === "no_change" ? []
       : operation.op === "patch_main" || operation.op === "patch_section" ? operation.patch.evidence_refs
@@ -151,6 +205,8 @@ export function validateMaintenancePlan(packetInput: unknown, planInput: unknown
   if (packet.locked_user_resolution_ref) {
     if (!plan.typed_resolution || plan.typed_resolution.locked_user_resolution_ref !== packet.locked_user_resolution_ref) throw new Error("Locked user resolution requires a matching typed_resolution");
     if (!packet.open_conflict_refs.includes(plan.typed_resolution.conflict_id)) throw new Error("typed_resolution conflict is not routed in the packet");
+    const decision = conflictResolutionDecisionSchema.parse({ outcome: plan.typed_resolution.outcome, affected_claim_refs: plan.typed_resolution.affected_claim_refs, resulting_scopes: plan.typed_resolution.resulting_scopes });
+    if (JSON.stringify(decision) !== JSON.stringify(packet.locked_user_resolution_decision)) throw new Error("typed_resolution differs from the user-authorized decision");
   } else if (plan.typed_resolution) throw new Error("typed_resolution requires a locked user resolution packet");
   return plan;
 }
